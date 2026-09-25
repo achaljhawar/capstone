@@ -21,6 +21,7 @@ dist/
 *.so
 *.exe
 *.out
+!test33/store/initProbs-*.out
 
 # Editors / OS
 .vscode/
