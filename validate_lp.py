@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Validate the Python LP against the C++/CPLEX results."""
+"""Validate the Python LP against the C++/CPLEX results.
+
+Usage: python3 validate_lp.py [--cpp-store test23/store_cplex/store_valueFuncs-seed395.out] [instance options]
+
+--cpp-store is a store file written by the C++/CPLEX run (keep it apart from test23/store, which gen.py
+overwrites); check [3] is skipped without it. Check [4] is a Python-only sanity check of the LP's randomized
+policy, not main.cpp's gradients (those are in patrol.gradients and tests/test_against_cpp.py).
+"""
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -11,16 +17,17 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from patrol.instance import load_from_cpp_outputs
+from patrol.cli import add_instance_args, instance_from_args
+from patrol.generate import knowledge_set_lines
 from patrol.lp import solve_relaxed, dp_value_functions
 from patrol.storefile import read_value_funcs
 
-CPP_OBJECTIVES = {0: 371.653, 1: 3036.31}   # from gen_log.txt "Solution value ="
-CPP_LOWER_BOUND = 3407.97
+CPP_OBJECTIVES = {0: 371.653, 1: 3036.31}   # "Solution value =" from the original CPLEX run
+CPP_LOWER_BOUND = 3407.97                    # "lower_bound =" in output.txt
 
 
 def gradients_under_policy(inst, sol, j):
-    """updateGradients_agent_randomized: E[present at i] - E[moves into i] under the LP policy."""
+    """E[present at i] - E[moves into i] under the LP's randomized policy (zero at an LP optimum)."""
     T, N = inst.maxtime, inst.area_num
     dist = [inst.init_probs[i][j].copy() for i in range(N)]
     g = np.zeros((T, N))
@@ -56,25 +63,21 @@ def gradients_under_policy(inst, sol, j):
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--log", default="output.txt")
-    ap.add_argument("--init-probs", default="test33/store/initProbs-scaler1-seed395.out")
-    ap.add_argument("--graph", default="graph/adjacent_matrix_10.in")
-    ap.add_argument("--cpp-store", default="test23/store/store_valueFuncs-seed395.out")
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_instance_args(ap)
+    ap.add_argument("--cpp-log", default="output.txt", help="the C++ run's stdout, for check [1]")
+    ap.add_argument("--cpp-store", default="test23/store_cplex/store_valueFuncs-seed395.out")
     args = ap.parse_args()
 
-    inst = load_from_cpp_outputs(args.log, args.init_probs, args.graph)
+    inst = instance_from_args(args)
     ok = True
 
-    # 1. knowledge sets
-    cpp_sets = {}
-    for line in Path(args.log).read_text().splitlines():
-        m = re.match(r"knowledgeSets\[(\d+)\]\[(\d+)\].*size=\d+(.*)$", line)
-        if m:
-            cpp_sets[(int(m.group(1)), int(m.group(2)))] = m.group(3).strip()
-    bad = [(i, j) for (i, j), txt in cpp_sets.items() if inst.processes[i][j].knowledge_str().strip() != txt]
-    print(f"[1] knowledge sets match C++ for {len(cpp_sets) - len(bad)}/{len(cpp_sets)} (i,j) pairs"
-          + (f"   MISMATCH at {bad}" if bad else ""))
+    # 1. knowledge sets and C parameters
+    cpp_lines = [line for line in Path(args.cpp_log).read_text().splitlines() if line.startswith("knowledgeSets")]
+    ours = knowledge_set_lines(inst)
+    bad = [k for k, (a, b) in enumerate(zip(ours, cpp_lines)) if a != b] + ([-1] if len(ours) != len(cpp_lines) else [])
+    print(f"[1] knowledge sets / C parameters match the C++ log for {len(ours) - len(bad)}/{len(cpp_lines)} (i,j) pairs"
+          + (f"   MISMATCH at lines {bad}" if bad else ""))
     ok &= not bad
 
     # 2. objective
