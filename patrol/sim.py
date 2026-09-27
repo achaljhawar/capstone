@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from scipy.stats import t as student_t
@@ -17,6 +18,7 @@ ITER_MAX = 1000                     # stdafx.h
 BASE_INIT_AGENTS = 100              # stdafx.h
 BASE_SIMULATION_SEED = 200          # stdafx.h
 INT_MAX = 2**31 - 1
+POLICY_NAMES = {DP_INDEX: "index", GREEDY: "greedy"}     # simulation(): names used in the trajectory files
 
 
 @dataclass
@@ -45,8 +47,15 @@ class RunResult:
 
 
 class Simulator:
-    def __init__(self, inst: Instance, sol: RelaxedSolution, scaler: int):
+    """PatrollingProcess's simulation half.
+
+    value_function picks the V behind the MAI index (see patrol.lp): "lp" is what the C++ reads from its store
+    file, "dp" the Bellman recursion for mu.
+    """
+
+    def __init__(self, inst: Instance, sol: RelaxedSolution, scaler: int, value_function: str = "dp"):
         self.inst, self.sol, self.scaler = inst, sol, scaler
+        self.value_function = value_function
         self.N, self.J, self.T = inst.area_num, inst.type_num, inst.maxtime
         self.nb = inst.neighbourhood
         self.procs = inst.processes
@@ -56,10 +65,14 @@ class Simulator:
         self.state: list[list[np.ndarray]] = []
         self.move_from: list[list[np.ndarray]] = []
         self.total_movement_adaptions = 0
+        # agents[j][a] = [area, sub-area] and link[i][j] = indices of the agents in area i, as the C++ keeps them
+        self.agents: list[list[list[int]]] = []
+        self.link: list[list[list[int]]] = []
 
     # ------------------------------------------------------------------ MAI index
     def _vartheta_table(self, j: int) -> list[list[list[float]]]:
         a = self.sol.agents[j]
+        V = a.values(self.value_function)
         table = []
         for t in range(self.T):
             row = []
@@ -71,7 +84,7 @@ class Simulator:
                     if t == self.T - 1:
                         vals.append(cost1 - cost0)
                         continue
-                    Vn = a.V[t + 1]
+                    Vn = V[t + 1]
                     off = a.w_i[i]
                     v = cost1 - cost0
                     tmp = 0.0
@@ -93,6 +106,8 @@ class Simulator:
         rng = GlibcRand(seed)
         self.state = [[np.zeros(self.scaler, dtype=int) for _ in range(self.N)] for _ in range(self.J)]
         self.move_from = [[np.full(self.scaler, -1, dtype=int) for _ in range(self.N)] for _ in range(self.J)]
+        self.agents = [[] for _ in range(self.J)]
+        self.link = [[[] for _ in range(self.J)] for _ in range(self.N)]
         for j in range(self.J):
             for i in range(self.N):
                 probs = self.inst.init_probs[i][j]
@@ -103,6 +118,9 @@ class Simulator:
                         count += probs[s]
                         if count > tmp:
                             self.state[j][i][k] = s
+                            if s % 2:
+                                self.agents[j].append([i, k])
+                                self.link[i][j].append(len(self.agents[j]) - 1)
                             break
 
     # ----------------------------------------------------------------- policies
@@ -232,19 +250,61 @@ class Simulator:
                         s += 1
                     s -= 1
                     st[k] = trs[s].s_next
+                    if move_in:
+                        origin = self.link[int(mf[k])][j]
+                        if not origin:
+                            raise RuntimeError(f"stateTransition: no agent in area [i={int(mf[k])}][j={j}]")
+                        a = origin.pop(0)
+                        self.link[i][j].append(a)
+                        self.agents[j][a] = [i, k]
 
     # -------------------------------------------------------------------- run
-    def run(self, policy: int, seed: int) -> RunResult:
-        """simulation (stdafx.cpp:4715)."""
+    def run(self, policy: int, seed: int, trajectory_dir: str | Path | None = None) -> RunResult:
+        """simulation (stdafx.cpp:4715). trajectory_dir: write the per-step files the C++ writes with outFlag."""
         rng = GlibcRand(seed)
         self.total_movement_adaptions = 0
         cost = 0.0
         for t in range(self.T):
             self._decide(t, policy)
             self._movement_adaption()
-            cost += self._current_cost() / self.scaler
+            step = self._current_cost() / self.scaler
+            cost += step
+            if trajectory_dir is not None:
+                self._write_trajectory(Path(trajectory_dir), policy, seed, t, step, cost)
             self._transition(rng)
         return RunResult(cost, self.total_movement_adaptions)
+
+    def _write_trajectory(self, out_dir: Path, policy: int, seed: int, t: int, step: float, cost: float) -> None:
+        """The outFlag block of simulation(): appends to trajectory-<policy>-seed<seed>-scaler<h>-*.out."""
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stem = out_dir / f"trajectory-{POLICY_NAMES[policy]}-seed{seed}-scaler{self.scaler}"
+
+        def append(suffix: str, text: str) -> None:
+            with open(f"{stem}-{suffix}.out", "a") as f:
+                f.write(text)
+
+        append("cost", f"{t + 1}\t{_cxx(step)}\t{_cxx(cost / (t + 1))}\t{_cxx(cost)}\n")
+        append("graph", f"For time = {t + 1}, the numbers of agents of different types in each area:\n"
+               + "".join(f"Area <{i}>: " + "".join(f"{len(self.link[i][j])} " for j in range(self.J)) + "\n"
+                         for i in range(self.N)) + "\n")
+        append("agents", f"For time = {t + 1}, positions of the agents (i,k):\n"
+               + "".join(f"Type-{j} agents: " + "".join(f"({a},{k}) " for a, k in self.agents[j]) + "\n"
+                         for j in range(self.J)) + "\n")
+        name = POLICY_NAMES[policy]
+        lines = [f"For time = {t + 1}, taking movements under the {name} policy:\n"]
+        for j in range(self.J):
+            lines.append(f"Type-{j} agents: \n")
+            for i in range(self.N):
+                for k in range(self.scaler):
+                    if self.move_from[j][i][k] >= 0:
+                        lines.append(f"\t({int(self.move_from[j][i][k])})-->({i},{k})\n")
+            lines.append("\n")
+        append("actions", "".join(lines) + "\n")
+
+
+def _cxx(x: float) -> str:
+    """A double through `std::ostream <<` at the default precision (6 significant digits, %g)."""
+    return f"{x:.6g}"
 
 
 @dataclass
@@ -259,26 +319,33 @@ class SweepRow:
     greedy_dev: float
     mai_dev: float
     lower_bound: float
+    slackness: float = 0.0
 
-    def as_line(self, slackness: float = 0.0) -> str:
+    def as_line(self, slackness: float | None = None) -> str:
         """Same tab-separated row main.cpp appends to long-term-performance-cost.out."""
-        f = lambda x: f"{x:.6g}"
+        f = _cxx
+        slackness = self.slackness if slackness is None else slackness
         return "\t".join([str(self.scaler), f(self.greedy_avg), f(self.greedy_ci), f(self.greedy_adaptions),
                           f(self.mai_avg), f(self.mai_ci), f(self.mai_adaptions),
                           f(self.greedy_dev), f(self.mai_dev), f(self.lower_bound), f(slackness)]) + "\t"
 
 
 def monte_carlo(inst: Instance, sol: RelaxedSolution, scaler: int, seed: int = 395,
-                iter_max: int = ITER_MAX, progress: bool = False) -> SweepRow:
-    """Monte-Carlo loop and confidence intervals (main.cpp:533-640)."""
-    sim = Simulator(inst, sol, scaler)
+                iter_max: int = ITER_MAX, progress: bool = False, value_function: str = "dp",
+                slackness: float = 0.0, trajectory_dir: str | Path | None = None) -> SweepRow:
+    """Monte-Carlo loop and confidence intervals (main.cpp:533-640).
+
+    The lower bound is getLowerBound's p0 . V_0 for the chosen value function (equal to the LP optimum up to
+    rounding); slackness is passed through to the row (see patrol.gradients).
+    """
+    sim = Simulator(inst, sol, scaler, value_function)
     costs1, costs2, adapt1, adapt2 = [], [], [], []
     for it in range(iter_max):
         init_seed, run_seed = it + seed + BASE_INIT_AGENTS, it + seed + BASE_SIMULATION_SEED
         sim.init_agents(init_seed)
-        r1 = sim.run(GREEDY, run_seed)
+        r1 = sim.run(GREEDY, run_seed, trajectory_dir)
         sim.init_agents(init_seed)
-        r2 = sim.run(DP_INDEX, run_seed)
+        r2 = sim.run(DP_INDEX, run_seed, trajectory_dir)
         costs1.append(r1.total_cost); costs2.append(r2.total_cost)
         adapt1.append(r1.movement_adaptions); adapt2.append(r2.movement_adaptions)
         if progress and (it + 1) % 50 == 0:
@@ -297,6 +364,6 @@ def monte_carlo(inst: Instance, sol: RelaxedSolution, scaler: int, seed: int = 3
         return float(np.sqrt(v / len(xs)) * student_t.ppf(0.975, len(xs) - 1))
 
     a1, a2 = running_mean(costs1), running_mean(costs2)
-    lb = sol.lower_bound
+    lb = sol.lower_bound_cxx(value_function)
     return SweepRow(scaler, a1, ci(costs1, a1), running_mean(adapt1), a2, ci(costs2, a2), running_mean(adapt2),
-                    (a1 - lb) / lb, (a2 - lb) / lb, lb)
+                    (a1 - lb) / lb, (a2 - lb) / lb, lb, slackness)
