@@ -21,12 +21,12 @@ sys.path.insert(0, str(ROOT))
 
 from patrol.cxx_compat import GlibcRand, heap_sort_cxx          # noqa: E402
 from patrol.generate import generate_instance, init_probs_text, knowledge_set_lines   # noqa: E402
-from patrol.gradients import slackness                           # noqa: E402
+from patrol.gradients import gradients, slackness                # noqa: E402
 from patrol.lp import RelaxedSolution, dp_value_functions, solve_relaxed   # noqa: E402
 from patrol.sim import monte_carlo                               # noqa: E402
 from patrol.storefile import read_value_funcs                    # noqa: E402
 
-# "Solution value =" from the original CPLEX run of cplexEquivalentProblem, one per agent type
+# "Solution value =" printed by CPLEX in cplexEquivalentProblem (both CPLEX runs agree), one per agent type
 CPLEX_OBJECTIVES = {0: 371.653, 1: 3036.31}
 SCALERS = (1, 2, 5)
 _CACHE: dict = {}
@@ -138,6 +138,50 @@ def test_simulation_matches_cpp_dp_store():
     """main.cpp run on the store file holding the Bellman V for mu (gen.py --value-function dp)."""
     for scaler in SCALERS:
         _check_simulation("dp", scaler)
+
+
+def _check_authors_build(store: str, reference: str):
+    """The authors' own build (Linux, real CPLEX 22.2 and Boost) on an LP solution CPLEX wrote.
+
+    Everything is bit-identical except the confidence intervals, whose t-quantile comes from Boost in the C++ and
+    from SciPy here; the two differ in the last bit.
+    """
+    rows = {}
+    for line in (DATA / reference).read_text().splitlines():
+        if line and not line.startswith("#"):
+            scaler, *cols = line.rstrip("\t").split("\t")
+            rows[int(scaler)] = [float(x) for x in cols]
+    sol = RelaxedSolution.from_store(_instance(), DATA / store)
+    slack = slackness(sol)
+    for scaler in SCALERS:
+        row = monte_carlo(_instance(), sol, scaler, value_function="lp", slackness=slack)
+        got = [row.greedy_avg, row.greedy_ci, row.greedy_adaptions, row.mai_avg, row.mai_ci, row.mai_adaptions,
+               row.greedy_dev, row.mai_dev, row.lower_bound, row.slackness]
+        ref = rows[scaler]
+        for k in (0, 2, 3, 5, 6, 7, 8, 9):
+            assert got[k] == ref[k], (scaler, k, got[k], ref[k])
+        for k in (1, 4):
+            assert abs(got[k] - ref[k]) <= 1e-15 * abs(ref[k]), (scaler, k, got[k], ref[k])
+
+
+def test_simulation_matches_authors_build_on_cplex_solution():
+    """CPLEX 22.2 on Linux aarch64 (default settings)."""
+    _check_authors_build("store_cplex22-seed395.out.gz", "cpp_reference_cplex.tsv")
+
+
+def test_simulation_matches_authors_build_on_x86_cplex_solution():
+    """CPLEX 22.2 on Linux x86-64 (default settings): the run that wrote output.txt."""
+    _check_authors_build("store_cplex22-x86-seed395.out.gz", "cpp_reference_cplex_x86.tsv")
+
+
+def test_gradients_match_cpp_log():
+    """output.txt's "Gradients for t=..." and "slackness =" lines, as main.cpp prints them, from the same LP solution."""
+    sol = RelaxedSolution.from_store(_instance(), DATA / "store_cplex22-x86-seed395.out.gz")
+    g = gradients(sol)
+    got = ["Gradients for t=%d: " % t + "".join(f"{x:g} " for x in g[t].ravel()) for t in range(len(g))]
+    got.append(f"slackness = {slackness(sol, g):g}")
+    log = (ROOT / "output.txt").read_text().splitlines()
+    assert got == [line for line in log if line.startswith(("Gradients for", "slackness"))]
 
 
 def test_trajectory_files_match_cpp():

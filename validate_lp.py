@@ -22,7 +22,7 @@ from patrol.generate import knowledge_set_lines
 from patrol.lp import solve_relaxed, dp_value_functions
 from patrol.storefile import read_value_funcs
 
-CPP_OBJECTIVES = {0: 371.653, 1: 3036.31}   # "Solution value =" from the original CPLEX run
+CPP_OBJECTIVES = {0: 371.653, 1: 3036.31}   # "Solution value =" from the C++ CPLEX runs
 CPP_LOWER_BOUND = 3407.97                    # "lower_bound =" in output.txt
 
 
