@@ -1,135 +1,164 @@
-"""Regression tests: the Python port must reproduce the C++ results exactly."""
+"""Regression tests: the Python port must reproduce the C++ results exactly.
+
+The C++ reference (tests/data) comes from tests/cpp_harness/make_reference.py: the shared main.cpp/stdafx.cpp,
+built without CPLEX, run on store files that gen.py wrote. Simulation rows are compared at full double precision.
+
+Run with `python3 -m pytest tests/` or, without pytest, `python3 tests/test_against_cpp.py`.
+"""
 from __future__ import annotations
 
-import subprocess
+import random
+import re
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "python"))
+ROOT = Path(__file__).resolve().parents[1]
+DATA = ROOT / "tests/data"
+sys.path.insert(0, str(ROOT))
 
 from patrol.cxx_compat import GlibcRand, heap_sort_cxx          # noqa: E402
-from patrol.instance import load_from_cpp_outputs                # noqa: E402
-from patrol.lp import dp_value_functions, solve_relaxed          # noqa: E402
+from patrol.generate import generate_instance, init_probs_text, knowledge_set_lines   # noqa: E402
+from patrol.gradients import slackness                           # noqa: E402
+from patrol.lp import RelaxedSolution, dp_value_functions, solve_relaxed   # noqa: E402
 from patrol.sim import monte_carlo                               # noqa: E402
 from patrol.storefile import read_value_funcs                    # noqa: E402
 
-_INST = None
-_SOL = None
+# "Solution value =" from the original CPLEX run of cplexEquivalentProblem, one per agent type
+CPLEX_OBJECTIVES = {0: 371.653, 1: 3036.31}
+SCALERS = (1, 2, 5)
+_CACHE: dict = {}
 
 
 def _instance():
-    global _INST
-    if _INST is None:
-        _INST = load_from_cpp_outputs(ROOT / "output.txt",
-                                      ROOT / "test33/store/initProbs-scaler1-seed395.out",
-                                      ROOT / "graph/adjacent_matrix_10.in")
-    return _INST
+    if "inst" not in _CACHE:
+        _CACHE["inst"] = generate_instance(ROOT / "process/test2_alpha.in", ROOT / "process/test2_beta.in",
+                                           ROOT / "graph/adjacent_matrix_10.in")
+    return _CACHE["inst"]
 
 
-def _solution():
-    global _SOL
-    if _SOL is None:
-        _SOL = solve_relaxed(_instance())
-    return _SOL
+def _store(mode: str) -> Path:
+    return DATA / f"store_{mode}-seed395.out.gz"
 
 
-def _cpp_rows():
+def _from_store(mode: str) -> RelaxedSolution:
+    if mode not in _CACHE:
+        _CACHE[mode] = RelaxedSolution.from_store(_instance(), _store(mode))
+    return _CACHE[mode]
+
+
+def _cpp_rows() -> dict[tuple[str, int], list[float]]:
     rows = {}
-    for line in (ROOT / "test33/long-term-performance-cost.out").read_text().splitlines():
-        f = line.split("\t")
-        if f and f[0].strip():
-            rows[int(f[0])] = f[:10]
+    for line in (DATA / "cpp_reference.tsv").read_text().splitlines():
+        mode, scaler, *cols = line.rstrip("\t").split("\t")
+        rows[mode, int(scaler)] = [float(x) for x in cols]
     return rows
 
 
-# ----------------------------------------------------------------------------- tests
-def test_glibc_rand_matches_reference():
-    """Compare against the C reference stream (needs gcc)."""
-    src = ROOT / "python/tests/rand_ref.c"
-    exe = Path("/tmp/rand_ref_test")
-    subprocess.run(["gcc", str(src), "-o", str(exe)], check=True)
-    out = subprocess.run([str(exe)], capture_output=True, text=True, check=True).stdout.splitlines()
-    for seed in (495, 595, 1394, 0):
+# ----------------------------------------------------------------------------- building blocks
+def test_glibc_rand_matches_glibc():
+    """glibc's rand() stream (reference values from tests/rand_ref.c built against glibc)."""
+    expected = {1: [1804289383, 846930886, 1681692777, 1714636915, 1957747793, 424238335],
+                495: [1897024824, 2055002966, 631967504, 936588255, 1773238871, 619741372],
+                595: [1540268827, 555748308, 114335029, 2023060965, 1550303082, 781625404],
+                1394: [1209920109, 1736359695, 1870539949, 1523400179, 1102788765, 656086340],
+                0: [1804289383, 846930886, 1681692777, 1714636915, 1957747793, 424238335]}
+    for seed, values in expected.items():
         g = GlibcRand(seed)
-        assert f"{seed}: " + " ".join(str(g.rand()) for _ in range(6)) in out
+        assert [g.rand() for _ in values] == values, seed
     g = GlibcRand(495)
-    for _ in range(999):
-        g.rand()
-    assert f"495@1000: {g.rand()}" in out
-    for _ in range(99000):
-        g.rand()
-    assert f"495@100001: {g.rand()}" in out
+    stream = [g.rand() for _ in range(100001)]
+    assert stream[999] == 2003149886 and stream[100000] == 1913098969
 
 
 def test_heap_sort_is_a_valid_sort():
-    import random
     rnd = random.Random(1)
     for _ in range(50):
         xs = [rnd.randint(0, 20) for _ in range(rnd.randint(0, 40))]
-        out = heap_sort_cxx(xs, lambda a, b: a > b)
-        assert out == sorted(xs)
+        assert heap_sort_cxx(xs, lambda a, b: a > b) == sorted(xs)
 
 
-def test_knowledge_sets_match_cpp_log():
+# ----------------------------------------------------------------------------- instance and LP
+def test_generated_instance_matches_cpp_log():
+    """Knowledge sets, C parameters and initial agent placement, against the C++ run's own outputs."""
     inst = _instance()
-    import re
-    txt = (ROOT / "output.txt").read_text().splitlines()
-    n = 0
-    for line in txt:
-        m = re.match(r"knowledgeSets\[(\d+)\]\[(\d+)\].*size=\d+(.*)$", line)
-        if m:
-            i, j = int(m.group(1)), int(m.group(2))
-            assert inst.processes[i][j].knowledge_str().strip() == m.group(3).strip()
-            n += 1
-    assert n == 20
+    log = [line for line in (ROOT / "output.txt").read_text().splitlines() if line.startswith("knowledgeSets")]
+    assert knowledge_set_lines(inst) == log
+    assert init_probs_text(inst) == (ROOT / "test33/store/initProbs-scaler1-seed395.out").read_text()
 
 
-def test_lp_objective_matches_cplex():
-    sol = _solution()
-    assert abs(sol.agents[0].objective - 371.653) < 5e-3
-    assert abs(sol.agents[1].objective - 3036.31) < 5e-3
-    assert abs(sol.lower_bound - 3407.97) < 5e-3
-
-
-def test_multipliers_match_cplex():
-    inst, sol = _instance(), _solution()
-    _, mu_c = read_value_funcs(ROOT / "test23/store_cplex/store_valueFuncs-seed395.out", inst)
+def test_lp_objective_and_multipliers():
+    inst = _instance()
+    sol = solve_relaxed(inst)
+    for j, ref in CPLEX_OBJECTIVES.items():
+        assert abs(sol.agents[j].objective - ref) < 5e-3
+    printed = float(re.search(r"lower_bound = ([0-9.]+)", (ROOT / "output.txt").read_text()).group(1))
+    assert abs(sol.lower_bound - printed) < 5e-3
+    _, mu = read_value_funcs(_store("lp"), inst)
     for j in range(inst.type_num):
-        assert np.abs(sol.agents[j].mu - mu_c[:, :, j]).max() < 1e-8
+        assert np.abs(sol.agents[j].mu - mu[:, :, j]).max() < 1e-8
 
 
-def test_value_functions_equal_dp_of_cplex_mu():
-    inst, sol = _instance(), _solution()
-    _, mu_c = read_value_funcs(ROOT / "test23/store_cplex/store_valueFuncs-seed395.out", inst)
+def test_dp_store_holds_the_dp_of_its_mu():
+    inst = _instance()
+    V, mu = read_value_funcs(_store("dp"), inst)
     for j in range(inst.type_num):
-        V_dp = dp_value_functions(inst, j, mu_c[:, :, j])
-        assert max(np.abs(sol.agents[j].V[t] - V_dp[t]).max() for t in range(inst.maxtime)) < 1e-8
+        V_dp = dp_value_functions(inst, j, np.ascontiguousarray(mu[:, :, j]))
+        a = _from_store("dp").agents[j]
+        for t in range(inst.maxtime):
+            assert np.array_equal(V_dp[t], np.concatenate([V[t][i][j] for i in range(inst.area_num)]))
+            assert np.array_equal(V_dp[t], a.V[t])
 
 
-def test_simulation_bit_exact_scaler_1():
-    inst, sol = _instance(), _solution()
-    row = monte_carlo(inst, sol, 1)
-    assert row.as_line().split("\t")[:10] == _cpp_rows()[1]
+# ----------------------------------------------------------------------------- against the C++ binary
+def test_slackness_matches_cpp():
+    """main.cpp's gradients/slackness (argmin actions of its DP) for the stored mu, bit for bit."""
+    ref = _cpp_rows()
+    for mode in ("lp", "dp"):
+        assert slackness(_from_store(mode)) == ref[mode, 1][9]
 
 
-def test_simulation_bit_exact_scaler_2():
-    inst, sol = _instance(), _solution()
-    row = monte_carlo(inst, sol, 2)
-    assert row.as_line().split("\t")[:10] == _cpp_rows()[2]
+def _check_simulation(mode: str, scaler: int):
+    sol = _from_store(mode)
+    row = monte_carlo(_instance(), sol, scaler, value_function="lp", slackness=slackness(sol))
+    got = [row.greedy_avg, row.greedy_ci, row.greedy_adaptions, row.mai_avg, row.mai_ci, row.mai_adaptions,
+           row.greedy_dev, row.mai_dev, row.lower_bound, row.slackness]
+    assert got == _cpp_rows()[mode, scaler], (mode, scaler, got)
+
+
+def test_simulation_matches_cpp_lp_store():
+    """main.cpp run on the store file holding the LP vertex's V (what the C++/CPLEX path writes)."""
+    for scaler in SCALERS:
+        _check_simulation("lp", scaler)
+
+
+def test_simulation_matches_cpp_dp_store():
+    """main.cpp run on the store file holding the Bellman V for mu (gen.py --value-function dp)."""
+    for scaler in SCALERS:
+        _check_simulation("dp", scaler)
+
+
+def test_trajectory_files_match_cpp():
+    """simulation()'s outFlag output: 2 Monte-Carlo iterations at scaler 2 on the "lp" store."""
+    with tempfile.TemporaryDirectory() as d:
+        monte_carlo(_instance(), _from_store("lp"), 2, iter_max=2, value_function="lp", trajectory_dir=d)
+        got = "".join(f"== {f.name}\n{f.read_text()}" for f in sorted(Path(d).glob("trajectory-*")))
+    assert got == (DATA / "cpp_trajectory.txt").read_text()
 
 
 if __name__ == "__main__":
     import inspect
+    import time
     fails = 0
     for name, fn in list(globals().items()):
         if name.startswith("test_") and inspect.isfunction(fn):
+            t0 = time.time()
             try:
                 fn()
-                print(f"PASS {name}")
+                print(f"PASS {name}  [{time.time() - t0:.1f} s]", flush=True)
             except Exception as e:          # noqa: BLE001
                 fails += 1
-                print(f"FAIL {name}: {e!r}")
+                print(f"FAIL {name}: {e!r}", flush=True)
     sys.exit(1 if fails else 0)

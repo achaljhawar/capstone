@@ -1,4 +1,5 @@
-/* Reference glibc rand() stream, used by test_cxx_compat.py to check the Python port. */
+/* Prints the glibc rand() values hard-coded in test_against_cpp.py. Build and run it on Linux/glibc:
+ * macOS's libc rand() is a different generator. */
 #include <stdio.h>
 #include <stdlib.h>
 int main(void) {
