@@ -21,12 +21,12 @@ sys.path.insert(0, str(ROOT))
 
 from patrol.cxx_compat import GlibcRand, heap_sort_cxx          # noqa: E402
 from patrol.generate import generate_instance, init_probs_text, knowledge_set_lines   # noqa: E402
-from patrol.gradients import slackness                           # noqa: E402
-from patrol.lp import RelaxedSolution, dp_value_functions, solve_relaxed   # noqa: E402
+from patrol.gradients import gradients, slackness                # noqa: E402
+from patrol.lp import RelaxedSolution, solve_relaxed             # noqa: E402
 from patrol.sim import monte_carlo                               # noqa: E402
 from patrol.storefile import read_value_funcs                    # noqa: E402
 
-# "Solution value =" from the original CPLEX run of cplexEquivalentProblem, one per agent type
+# "Solution value =" printed by CPLEX in cplexEquivalentProblem (both CPLEX runs agree), one per agent type
 CPLEX_OBJECTIVES = {0: 371.653, 1: 3036.31}
 SCALERS = (1, 2, 5)
 _CACHE: dict = {}
@@ -39,21 +39,20 @@ def _instance():
     return _CACHE["inst"]
 
 
-def _store(mode: str) -> Path:
-    return DATA / f"store_{mode}-seed395.out.gz"
+STORE = DATA / "store_lp-seed395.out.gz"     # gen.py's LP solution, the one the C++ reference rows were run on
 
 
-def _from_store(mode: str) -> RelaxedSolution:
-    if mode not in _CACHE:
-        _CACHE[mode] = RelaxedSolution.from_store(_instance(), _store(mode))
-    return _CACHE[mode]
+def _from_store() -> RelaxedSolution:
+    if "sol" not in _CACHE:
+        _CACHE["sol"] = RelaxedSolution.from_store(_instance(), STORE)
+    return _CACHE["sol"]
 
 
-def _cpp_rows() -> dict[tuple[str, int], list[float]]:
+def _cpp_rows() -> dict[int, list[float]]:
     rows = {}
     for line in (DATA / "cpp_reference.tsv").read_text().splitlines():
-        mode, scaler, *cols = line.rstrip("\t").split("\t")
-        rows[mode, int(scaler)] = [float(x) for x in cols]
+        scaler, *cols = line.rstrip("\t").split("\t")
+        rows[int(scaler)] = [float(x) for x in cols]
     return rows
 
 
@@ -96,54 +95,75 @@ def test_lp_objective_and_multipliers():
         assert abs(sol.agents[j].objective - ref) < 5e-3
     printed = float(re.search(r"lower_bound = ([0-9.]+)", (ROOT / "output.txt").read_text()).group(1))
     assert abs(sol.lower_bound - printed) < 5e-3
-    _, mu = read_value_funcs(_store("lp"), inst)
+    _, mu = read_value_funcs(STORE, inst)
     for j in range(inst.type_num):
         assert np.abs(sol.agents[j].mu - mu[:, :, j]).max() < 1e-8
-
-
-def test_dp_store_holds_the_dp_of_its_mu():
-    inst = _instance()
-    V, mu = read_value_funcs(_store("dp"), inst)
-    for j in range(inst.type_num):
-        V_dp = dp_value_functions(inst, j, np.ascontiguousarray(mu[:, :, j]))
-        a = _from_store("dp").agents[j]
-        for t in range(inst.maxtime):
-            assert np.array_equal(V_dp[t], np.concatenate([V[t][i][j] for i in range(inst.area_num)]))
-            assert np.array_equal(V_dp[t], a.V[t])
 
 
 # ----------------------------------------------------------------------------- against the C++ binary
 def test_slackness_matches_cpp():
     """main.cpp's gradients/slackness (argmin actions of its DP) for the stored mu, bit for bit."""
-    ref = _cpp_rows()
-    for mode in ("lp", "dp"):
-        assert slackness(_from_store(mode)) == ref[mode, 1][9]
+    assert slackness(_from_store()) == _cpp_rows()[1][9]
 
 
-def _check_simulation(mode: str, scaler: int):
-    sol = _from_store(mode)
-    row = monte_carlo(_instance(), sol, scaler, value_function="lp", slackness=slackness(sol))
-    got = [row.greedy_avg, row.greedy_ci, row.greedy_adaptions, row.mai_avg, row.mai_ci, row.mai_adaptions,
-           row.greedy_dev, row.mai_dev, row.lower_bound, row.slackness]
-    assert got == _cpp_rows()[mode, scaler], (mode, scaler, got)
-
-
-def test_simulation_matches_cpp_lp_store():
-    """main.cpp run on the store file holding the LP vertex's V (what the C++/CPLEX path writes)."""
+def test_simulation_matches_cpp():
+    """main.cpp run on gen.py's store file, every column at full double precision."""
+    sol = _from_store()
     for scaler in SCALERS:
-        _check_simulation("lp", scaler)
+        row = monte_carlo(_instance(), sol, scaler, slackness=slackness(sol))
+        got = [row.greedy_avg, row.greedy_ci, row.greedy_adaptions, row.mai_avg, row.mai_ci, row.mai_adaptions,
+               row.greedy_dev, row.mai_dev, row.lower_bound, row.slackness]
+        assert got == _cpp_rows()[scaler], (scaler, got)
 
 
-def test_simulation_matches_cpp_dp_store():
-    """main.cpp run on the store file holding the Bellman V for mu (gen.py --value-function dp)."""
+def _check_authors_build(store: str, reference: str):
+    """The authors' own build (Linux, real CPLEX 22.2 and Boost) on an LP solution CPLEX wrote.
+
+    Everything is bit-identical except the confidence intervals, whose t-quantile comes from Boost in the C++ and
+    from SciPy here; the two differ in the last bit.
+    """
+    rows = {}
+    for line in (DATA / reference).read_text().splitlines():
+        if line and not line.startswith("#"):
+            scaler, *cols = line.rstrip("\t").split("\t")
+            rows[int(scaler)] = [float(x) for x in cols]
+    sol = RelaxedSolution.from_store(_instance(), DATA / store)
+    slack = slackness(sol)
     for scaler in SCALERS:
-        _check_simulation("dp", scaler)
+        row = monte_carlo(_instance(), sol, scaler, slackness=slack)
+        got = [row.greedy_avg, row.greedy_ci, row.greedy_adaptions, row.mai_avg, row.mai_ci, row.mai_adaptions,
+               row.greedy_dev, row.mai_dev, row.lower_bound, row.slackness]
+        ref = rows[scaler]
+        for k in (0, 2, 3, 5, 6, 7, 8, 9):
+            assert got[k] == ref[k], (scaler, k, got[k], ref[k])
+        for k in (1, 4):
+            assert abs(got[k] - ref[k]) <= 1e-15 * abs(ref[k]), (scaler, k, got[k], ref[k])
+
+
+def test_simulation_matches_authors_build_on_cplex_solution():
+    """CPLEX 22.2 on Linux aarch64 (default settings)."""
+    _check_authors_build("store_cplex22-seed395.out.gz", "cpp_reference_cplex.tsv")
+
+
+def test_simulation_matches_authors_build_on_x86_cplex_solution():
+    """CPLEX 22.2 on Linux x86-64 (default settings): the run that wrote output.txt."""
+    _check_authors_build("store_cplex22-x86-seed395.out.gz", "cpp_reference_cplex_x86.tsv")
+
+
+def test_gradients_match_cpp_log():
+    """output.txt's "Gradients for t=..." and "slackness =" lines, as main.cpp prints them, from the same LP solution."""
+    sol = RelaxedSolution.from_store(_instance(), DATA / "store_cplex22-x86-seed395.out.gz")
+    g = gradients(sol)
+    got = ["Gradients for t=%d: " % t + "".join(f"{x:g} " for x in g[t].ravel()) for t in range(len(g))]
+    got.append(f"slackness = {slackness(sol, g):g}")
+    log = (ROOT / "output.txt").read_text().splitlines()
+    assert got == [line for line in log if line.startswith(("Gradients for", "slackness"))]
 
 
 def test_trajectory_files_match_cpp():
-    """simulation()'s outFlag output: 2 Monte-Carlo iterations at scaler 2 on the "lp" store."""
+    """simulation()'s outFlag output: 2 Monte-Carlo iterations at scaler 2."""
     with tempfile.TemporaryDirectory() as d:
-        monte_carlo(_instance(), _from_store("lp"), 2, iter_max=2, value_function="lp", trajectory_dir=d)
+        monte_carlo(_instance(), _from_store(), 2, iter_max=2, trajectory_dir=d)
         got = "".join(f"== {f.name}\n{f.read_text()}" for f in sorted(Path(d).glob("trajectory-*")))
     assert got == (DATA / "cpp_trajectory.txt").read_text()
 

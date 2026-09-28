@@ -47,15 +47,10 @@ class RunResult:
 
 
 class Simulator:
-    """PatrollingProcess's simulation half.
+    """PatrollingProcess's simulation half."""
 
-    value_function picks the V behind the MAI index (see patrol.lp): "lp" is what the C++ reads from its store
-    file, "dp" the Bellman recursion for mu.
-    """
-
-    def __init__(self, inst: Instance, sol: RelaxedSolution, scaler: int, value_function: str = "dp"):
+    def __init__(self, inst: Instance, sol: RelaxedSolution, scaler: int):
         self.inst, self.sol, self.scaler = inst, sol, scaler
-        self.value_function = value_function
         self.N, self.J, self.T = inst.area_num, inst.type_num, inst.maxtime
         self.nb = inst.neighbourhood
         self.procs = inst.processes
@@ -72,7 +67,7 @@ class Simulator:
     # ------------------------------------------------------------------ MAI index
     def _vartheta_table(self, j: int) -> list[list[list[float]]]:
         a = self.sol.agents[j]
-        V = a.values(self.value_function)
+        V = a.V
         table = []
         for t in range(self.T):
             row = []
@@ -331,14 +326,13 @@ class SweepRow:
 
 
 def monte_carlo(inst: Instance, sol: RelaxedSolution, scaler: int, seed: int = 395,
-                iter_max: int = ITER_MAX, progress: bool = False, value_function: str = "dp",
-                slackness: float = 0.0, trajectory_dir: str | Path | None = None) -> SweepRow:
+                iter_max: int = ITER_MAX, progress: bool = False, slackness: float = 0.0,
+                trajectory_dir: str | Path | None = None) -> SweepRow:
     """Monte-Carlo loop and confidence intervals (main.cpp:533-640).
 
-    The lower bound is getLowerBound's p0 . V_0 for the chosen value function (equal to the LP optimum up to
-    rounding); slackness is passed through to the row (see patrol.gradients).
+    The lower bound is getLowerBound's p0 . V_0 (equal to the LP optimum up to rounding); slackness is passed through to the row (see patrol.gradients).
     """
-    sim = Simulator(inst, sol, scaler, value_function)
+    sim = Simulator(inst, sol, scaler)
     costs1, costs2, adapt1, adapt2 = [], [], [], []
     for it in range(iter_max):
         init_seed, run_seed = it + seed + BASE_INIT_AGENTS, it + seed + BASE_SIMULATION_SEED
@@ -364,6 +358,6 @@ def monte_carlo(inst: Instance, sol: RelaxedSolution, scaler: int, seed: int = 3
         return float(np.sqrt(v / len(xs)) * student_t.ppf(0.975, len(xs) - 1))
 
     a1, a2 = running_mean(costs1), running_mean(costs2)
-    lb = sol.lower_bound_cxx(value_function)
+    lb = sol.lower_bound_cxx()
     return SweepRow(scaler, a1, ci(costs1, a1), running_mean(adapt1), a2, ci(costs2, a2), running_mean(adapt2),
                     (a1 - lb) / lb, (a2 - lb) / lb, lb, slackness)

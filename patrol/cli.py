@@ -6,10 +6,8 @@ import argparse
 from . import generate
 from .instance import Instance, load_from_cpp_outputs
 
-VALUE_FUNCTION_HELP = ('V behind the MAI index: "lp" = the LP vertex\'s V, as the C++ stores and uses it '
-                       '(off-support entries are solver-specific); "dp" = Bellman recursion for the optimal mu')
 ROW_BOUND_HELP = ("drop the C++'s -1e5 lower bound on every LP row: about 4x faster, same optimum and mu (up to "
-                  'rounding), but a different LP vertex, so a different "lp" V off the support')
+                  'rounding), but a different LP vertex, so a different V off the support')
 
 
 def add_instance_args(ap: argparse.ArgumentParser) -> None:

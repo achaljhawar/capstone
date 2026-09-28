@@ -1,16 +1,12 @@
 """The relaxed problem as a sparse LP (cplexEquivalentProblem_agent, stdafx.cpp:2191), solved with HiGHS.
 
-Two value functions come out of a solve, and they differ off the LP's support:
+The value function V is the V block of the LP vertex, which is what the C++ writes to store_valueFuncs and what
+main.cpp's MAI index (getVartheta) reads. For states the LP never reaches, V is not pinned down and sits at
+whatever the solver returned (often the +-1e5 variable bound), so it is solver-specific: HiGHS and CPLEX can give
+different values there, and the MAI simulation results move with them.
 
-* ``"lp"``: the V block of the LP vertex itself. This is what the C++ writes to store_valueFuncs and what
-  main.cpp's MAI index (getVartheta) reads. For states the LP never reaches, V is not pinned down and sits at
-  whatever the solver returned (often the +-1e5 variable bound), so it is solver-specific: HiGHS and CPLEX can
-  give different values there, and the MAI simulation results move with them.
-* ``"dp"``: the Bellman recursion for the optimal mu (dynamicProgrammingWithGivenMultipliers_agent). It equals
-  the LP V on the support and is well defined everywhere else.
-
-Library calls default to ``"dp"`` and to rows without the C++'s -1e5 lower bound (the previous behaviour); the
-gen.py/simulate.py command lines default to ``"lp"`` with ranged rows, to match the C++.
+solve_relaxed defaults to rows without the C++'s -1e5 lower bound; the gen.py/simulate.py command lines impose
+it, to match the C++.
 """
 from __future__ import annotations
 
@@ -24,7 +20,6 @@ from scipy.optimize import linprog
 from .instance import Instance
 
 VAR_BOUND = 1e5   # C++: minSols = -1e5, maxSols = 1e5 on every variable, and constraintsMin = -1e5 on every row
-VALUE_FUNCTIONS = ("lp", "dp")
 
 
 @dataclass
@@ -32,7 +27,7 @@ class AgentLP:
     """LP solution for one agent type."""
     agent_type: int
     objective: float                       # optimal value (== contribution to the lower bound)
-    V: list[np.ndarray]                    # Bellman V for mu; V[t] concatenates the areas, area i at offset w_i[i]
+    V: list[np.ndarray]                    # V of the LP vertex; V[t] concatenates the areas, area i at offset w_i[i]
     mu: np.ndarray                         # (T, N)
     policy: list[list[np.ndarray]] | None  # policy[t][i] shape (stateNum, |N(i)|+1), rows sum to 1
     w_i: np.ndarray                        # area offsets into V[t]
@@ -42,12 +37,6 @@ class AgentLP:
     n_rows: int
     n_cols: int
     nnz: int
-    V_lp: list[np.ndarray] | None = None   # V of the LP vertex (what the C++ stores); same layout as V
-
-    def values(self, value_function: str = "dp") -> list[np.ndarray]:
-        if value_function not in VALUE_FUNCTIONS:
-            raise ValueError(f"value_function must be one of {VALUE_FUNCTIONS}, got {value_function!r}")
-        return self.V_lp if value_function == "lp" else self.V
 
 
 def _offsets(inst: Instance, j: int) -> tuple[list[int], np.ndarray, int]:
@@ -63,7 +52,7 @@ def _linprog(c, A, b, verbose):
 
 def build_and_solve(inst: Instance, j: int, verbose: bool = False, ranged_rows: bool = False) -> AgentLP:
     """ranged_rows: also impose the C++'s row lower bound, -1e5 <= A x (constraintsMin). It binds for thousands of
-    rows, so it changes which optimal vertex comes back (and so the "lp" V off the support), not the optimum.
+    rows, so it changes which optimal vertex comes back (and so V off the support), not the optimum.
     About 4x slower, since linprog needs it as a second copy of A."""
     T, N = inst.maxtime, inst.area_num
     procs = [inst.processes[i][j] for i in range(N)]
@@ -120,7 +109,7 @@ def build_and_solve(inst: Instance, j: int, verbose: bool = False, ranged_rows: 
         raise RuntimeError(f"HiGHS failed for agent type {j}: {res.message}")
 
     x = res.x
-    V_lp = [x[t * W:(t + 1) * W].copy() for t in range(T)]
+    V = [x[t * W:(t + 1) * W].copy() for t in range(T)]
     mu = x[n_V:].reshape(T, N).copy()
 
     # --- occupation measures from the row duals (Python-only extra: the C++ does not output a policy)
@@ -143,15 +132,12 @@ def build_and_solve(inst: Instance, j: int, verbose: bool = False, ranged_rows: 
             pol_t.append(block)
         policy.append(pol_t)
 
-    # --- V from the Bellman recursion for this mu
-    V = dp_value_functions(inst, j, mu)
     if verbose:
-        obj_dp = sum(float(inst.init_probs[i][j] @ V[0][w_i[i]:w_i[i] + S[i]]) for i in range(N))
-        n_bound = sum(int((np.abs(V_lp[t]) > 0.9 * VAR_BOUND).sum()) for t in range(T))
-        print(f"[lp] agent type {j}: p0.DP(mu) = {obj_dp:.6f} (LP {-res.fun:.6f}); raw LP V had {n_bound} entries at the bound")
+        n_bound = sum(int((np.abs(V[t]) > 0.9 * VAR_BOUND).sum()) for t in range(T))
+        print(f"[lp] agent type {j}: objective {-res.fun:.6f}; V has {n_bound} entries at the bound")
 
     return AgentLP(j, float(-res.fun), V, mu, policy, w_i, randomized, unreached,
-                   res.message, n_rows, n_cols, A.nnz, V_lp)
+                   res.message, n_rows, n_cols, A.nnz)
 
 
 def dp_with_actions(inst: Instance, j: int, mu: np.ndarray) -> tuple[list[np.ndarray], list[list[list[int]]]]:
@@ -159,6 +145,7 @@ def dp_with_actions(inst: Instance, j: int, mu: np.ndarray) -> tuple[list[np.nda
 
     Same floating-point operation order as the C++, and the same tie-breaking (start from "no move", switch only
     on a strictly smaller value), so V and the optimal actions are bit-identical to the C++ ones.
+    main.cpp uses only the actions (for the gradients, see patrol.gradients).
     Returns V[t] (layout as AgentLP.V) and opt_actions[t][i][s] (index into neighbourhood[i]; |N(i)| = no move).
     """
     T, N = inst.maxtime, inst.area_num
@@ -194,10 +181,6 @@ def dp_with_actions(inst: Instance, j: int, mu: np.ndarray) -> tuple[list[np.nda
     return V, actions
 
 
-def dp_value_functions(inst: Instance, j: int, mu: np.ndarray) -> list[np.ndarray]:
-    return dp_with_actions(inst, j, mu)[0]
-
-
 @dataclass
 class RelaxedSolution:
     """Both agent types, in the layouts the C++ files use."""
@@ -208,29 +191,26 @@ class RelaxedSolution:
     def lower_bound(self) -> float:
         return sum(a.objective for a in self.agents)
 
-    def lower_bound_cxx(self, value_function: str = "dp") -> float:
-        """getLowerBound (stdafx.cpp:1385): sum_i sum_j p0 . V_0 in the C++ loop order, for the V the MAI index uses."""
+    def lower_bound_cxx(self) -> float:
+        """getLowerBound (stdafx.cpp:1385): sum_i sum_j p0 . V_0 in the C++ loop order."""
         total = 0.0
         for i in range(self.inst.area_num):
             for j in range(self.inst.type_num):
-                p0, v0 = self.inst.init_probs[i][j], self.value_function(0, i, j, value_function)
+                p0, v0 = self.inst.init_probs[i][j], self.value_function(0, i, j)
                 for s in range(p0.size):
                     total += float(p0[s]) * float(v0[s])
         return total
 
-    def value_function(self, t: int, i: int, j: int, value_function: str = "dp") -> np.ndarray:
+    def value_function(self, t: int, i: int, j: int) -> np.ndarray:
         a = self.agents[j]
-        return a.values(value_function)[t][a.w_i[i]:a.w_i[i] + self.inst.state_num(i, j)]
+        return a.V[t][a.w_i[i]:a.w_i[i] + self.inst.state_num(i, j)]
 
     def multiplier(self, t: int, i: int, j: int) -> float:
         return float(self.agents[j].mu[t, i])
 
     @classmethod
     def from_store(cls, inst: Instance, path: str | Path) -> "RelaxedSolution":
-        """Load a store_valueFuncs file (e.g. one the C++/CPLEX run wrote), the way main.cpp imports it.
-
-        The file's V becomes the "lp" value function; "dp" is recomputed from the file's mu.
-        """
+        """Load a store_valueFuncs file (e.g. one the C++/CPLEX run wrote), the way main.cpp imports it."""
         from .storefile import read_value_funcs
         Vf, muf = read_value_funcs(path, inst)
         agents = []
@@ -241,8 +221,7 @@ class RelaxedSolution:
                 raise ValueError(f"{path}: value-function lines do not match the instance's state counts")
             mu = np.ascontiguousarray(muf[:, :, j])
             obj = sum(float(inst.init_probs[i][j] @ V_file[0][w_i[i]:w_i[i] + S[i]]) for i in range(inst.area_num))
-            agents.append(AgentLP(j, obj, dp_value_functions(inst, j, mu), mu, None, w_i, 0, 0,
-                                  f"loaded from {path}", 0, 0, 0, V_file))
+            agents.append(AgentLP(j, obj, V_file, mu, None, w_i, 0, 0, f"loaded from {path}", 0, 0, 0))
         return cls(inst, agents)
 
 

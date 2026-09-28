@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Generate the instance, solve the relaxed LP and write the store file main.cpp imports.
 
-Usage: python3 gen.py [--seed 395] [--value-function lp|dp] [--out-dir test23/store] [--policy] [-v]
+Usage: python3 gen.py [--seed 395] [--out-dir test23/store] [--policy] [-v]
 
-By default the store file holds the LP vertex's V, as the C++/CPLEX path writes it. Its off-support entries
-depend on the solver, so HiGHS and CPLEX files can give different MAI results; --value-function dp writes the
-Bellman V for the optimal mu instead.
+The store file holds the LP vertex's V, as the C++/CPLEX path writes it. Its off-support entries depend on the
+solver, so HiGHS and CPLEX files can give different MAI results.
 """
 from __future__ import annotations
 
@@ -16,16 +15,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from patrol.cli import ROW_BOUND_HELP, VALUE_FUNCTION_HELP, add_instance_args, instance_from_args
+from patrol.cli import ROW_BOUND_HELP, add_instance_args, instance_from_args
 from patrol.generate import knowledge_set_lines
-from patrol.lp import VALUE_FUNCTIONS, solve_relaxed
+from patrol.lp import solve_relaxed
 from patrol.storefile import write_policy, write_value_funcs
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     add_instance_args(ap)
-    ap.add_argument("--value-function", choices=VALUE_FUNCTIONS, default="lp", help=VALUE_FUNCTION_HELP)
     ap.add_argument("--no-row-lower-bound", action="store_true", help=ROW_BOUND_HELP)
     ap.add_argument("--out-dir", default="test23/store", help="main.cpp reads test23/store/store_valueFuncs-seed<seed>.out")
     ap.add_argument("--policy", action="store_true",
@@ -48,8 +46,8 @@ def main() -> int:
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     vf = out / f"store_valueFuncs-seed{args.seed}.out"
-    write_value_funcs(sol, vf, args.value_function)
-    print(f"wrote {vf}  (V = {args.value_function})")
+    write_value_funcs(sol, vf)
+    print(f"wrote {vf}")
     if args.policy:
         pol = out / f"store_lpPolicy-seed{args.seed}.out"
         write_policy(sol, pol)

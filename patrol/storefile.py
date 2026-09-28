@@ -15,15 +15,15 @@ def _read_text(path: str | Path) -> str:
     return gzip.decompress(path.read_bytes()).decode() if path.suffix == ".gz" else path.read_text()
 
 
-def write_value_funcs(sol: RelaxedSolution, path: str | Path, value_function: str = "dp") -> None:
-    """Header, then V for every (t, i, j), then mu one line per t. value_function: "lp" (what the C++ writes) or "dp"."""
+def write_value_funcs(sol: RelaxedSolution, path: str | Path) -> None:
+    """Header, then V for every (t, i, j), then mu one line per t."""
     inst = sol.inst
     T, N, J = inst.maxtime, inst.area_num, inst.type_num
     lines = [f"{N} {J} {T} {inst.var_num()}"]
     for t in range(T):
         for i in range(N):
             for j in range(J):
-                lines.append(" ".join(repr(float(v)) for v in sol.value_function(t, i, j, value_function)))
+                lines.append(" ".join(repr(float(v)) for v in sol.value_function(t, i, j)))
     for t in range(T):
         lines.append(" ".join(repr(sol.multiplier(t, i, j)) for i in range(N) for j in range(J)))
     Path(path).write_text("\n".join(lines) + "\n")

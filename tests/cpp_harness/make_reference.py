@@ -3,11 +3,11 @@
 
 Usage: CXX=g++-15 python3 tests/cpp_harness/make_reference.py "<code for sharing dir>" [--work /tmp/cpp-ref]
 
-1. gen.py writes a store file in each value-function mode ("lp", "dp"); both are kept, gzipped, in tests/data.
-2. The C++ (built by build.py) runs on each store file for every scaler in SCALERS; its 17-digit rows go to
-   tests/data/cpp_reference.tsv as  <mode> <scaler> <11 columns of long-term-performance-cost.out>.
-3. A second build with ITER_MAX=2 and outFlag on writes the trajectory files for scaler 2 ("lp" store); they
-   are concatenated into tests/data/cpp_trajectory.txt.
+1. gen.py writes the store file; it is kept, gzipped, in tests/data/store_lp-seed395.out.gz.
+2. The C++ (built by build.py) runs on it for every scaler in SCALERS; its 17-digit rows (the 11 columns of
+   long-term-performance-cost.out, starting with the scaler) go to tests/data/cpp_reference.tsv.
+3. A second build with ITER_MAX=2 and outFlag on writes the trajectory files for scaler 2; they are concatenated
+   into tests/data/cpp_trajectory.txt.
 """
 from __future__ import annotations
 
@@ -42,21 +42,18 @@ def main() -> int:
 
     DATA.mkdir(parents=True, exist_ok=True)
     store_name = f"store_valueFuncs-seed{SEED}.out"
-    rows = []
-    for mode in ("lp", "dp"):
-        sh([sys.executable, ROOT / "gen.py", "--seed", SEED, "--value-function", mode,
-            "--out-dir", args.work / f"store-{mode}"], cwd=ROOT)
-        store = args.work / f"store-{mode}" / store_name
-        (DATA / f"store_{mode}-seed{SEED}.out.gz").write_bytes(gzip.compress(store.read_bytes(), mtime=0))
-        shutil.copyfile(store, build / "test23/store" / store_name)
-        perf = build / "test33/long-term-performance-cost.out"
-        perf.unlink(missing_ok=True)
-        for scaler in SCALERS:
-            sh([build / "edit", scaler], cwd=build, quiet=True)
-        rows += [f"{mode}\t{line.rstrip()}" for line in perf.read_text().splitlines() if line.strip()]
+    sh([sys.executable, ROOT / "gen.py", "--seed", SEED, "--out-dir", args.work / "store"], cwd=ROOT)
+    store = args.work / "store" / store_name
+    (DATA / f"store_lp-seed{SEED}.out.gz").write_bytes(gzip.compress(store.read_bytes(), mtime=0))
+    shutil.copyfile(store, build / "test23/store" / store_name)
+    perf = build / "test33/long-term-performance-cost.out"
+    perf.unlink(missing_ok=True)
+    for scaler in SCALERS:
+        sh([build / "edit", scaler], cwd=build, quiet=True)
+    rows = [line.rstrip() for line in perf.read_text().splitlines() if line.strip()]
     (DATA / "cpp_reference.tsv").write_text("\n".join(rows) + "\n")
 
-    shutil.copyfile(args.work / "store-lp" / store_name, build_traj / "test23/store" / store_name)
+    shutil.copyfile(store, build_traj / "test23/store" / store_name)
     for f in (build_traj / "test33/store").glob("trajectory-*"):
         f.unlink()
     sh([build_traj / "edit", TRAJECTORY_SCALER], cwd=build_traj, quiet=True)

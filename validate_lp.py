@@ -19,10 +19,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from patrol.cli import add_instance_args, instance_from_args
 from patrol.generate import knowledge_set_lines
-from patrol.lp import solve_relaxed, dp_value_functions
+from patrol.lp import solve_relaxed
 from patrol.storefile import read_value_funcs
 
-CPP_OBJECTIVES = {0: 371.653, 1: 3036.31}   # "Solution value =" from the original CPLEX run
+CPP_OBJECTIVES = {0: 371.653, 1: 3036.31}   # "Solution value =" from the C++ CPLEX runs
 CPP_LOWER_BOUND = 3407.97                    # "lower_bound =" in output.txt
 
 
@@ -93,7 +93,7 @@ def main() -> int:
           + ("" if diff < 5e-3 else "   MISMATCH"))
     ok &= diff < 5e-3
 
-    # 3. mu and V vs the CPLEX file
+    # 3. mu vs the CPLEX file
     if Path(args.cpp_store).exists():
         Vc, muc = read_value_funcs(args.cpp_store, inst)
         dmu = max(abs(sol.multiplier(t, i, j) - muc[t, i, j])
@@ -101,14 +101,10 @@ def main() -> int:
         print(f"[3] max|mu_py - mu_cpp| = {dmu:.3e}" + ("" if dmu < 1e-6 else "   MISMATCH"))
         ok &= dmu < 1e-6
         for j in range(inst.type_num):
-            a = sol.agents[j]
-            Vdp_cpp = dp_value_functions(inst, j, muc[:, :, j])
-            dV = max(np.abs(a.V[t] - Vdp_cpp[t]).max() for t in range(inst.maxtime))
             n_bound = sum(int((np.abs(Vc[t][i][j]) > 9e4).sum()) for t in range(inst.maxtime) for i in range(inst.area_num))
             n_all = inst.maxtime * sum(inst.state_num(i, j) for i in range(inst.area_num))
-            print(f"[3] agent type {j}: max|V_py - DP(mu_cpp)| = {dV:.3e}" + ("" if dV < 1e-6 else "   MISMATCH")
-                  + f"   (CPLEX file: {n_bound}/{n_all} raw V entries at the +-1e5 bound -- undefined off-support)")
-            ok &= dV < 1e-6
+            print(f"[3] agent type {j}: CPLEX file has {n_bound}/{n_all} V entries at the +-1e5 bound "
+                  "(off the LP's support, so solver-specific)")
     else:
         print(f"[3] skipped: {args.cpp_store} not found")
 
