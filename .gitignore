@@ -29,4 +29,10 @@ dist/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Working documents: kept on disk, not in the repo.
+# Only README.md and benchmarks.md are tracked as docs.
 DESIGN.md
+DECISIONS.md
+REPRODUCTION.md
+VALUE_FUNCTION.md

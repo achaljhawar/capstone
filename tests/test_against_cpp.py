@@ -107,13 +107,22 @@ def test_slackness_matches_cpp():
 
 
 def test_simulation_matches_cpp():
-    """main.cpp run on gen.py's store file, every column at full double precision."""
+    """main.cpp run on gen.py's store file, every column at full double precision.
+
+    Columns 1 and 4 are the confidence intervals, whose t-quantile comes from Boost in the C++ and from SciPy
+    here; the two differ in the last bit, so they get the same 1e-15 tolerance the authors'-build checks use
+    (measured difference: 6.0e-16 and 4.8e-16 relative). Every other column is compared exactly.
+    """
     sol = _from_store()
     for scaler in SCALERS:
         row = monte_carlo(_instance(), sol, scaler, slackness=slackness(sol))
         got = [row.greedy_avg, row.greedy_ci, row.greedy_adaptions, row.mai_avg, row.mai_ci, row.mai_adaptions,
                row.greedy_dev, row.mai_dev, row.lower_bound, row.slackness]
-        assert got == _cpp_rows()[scaler], (scaler, got)
+        ref = _cpp_rows()[scaler]
+        for k in (0, 2, 3, 5, 6, 7, 8, 9):
+            assert got[k] == ref[k], (scaler, k, got[k], ref[k])
+        for k in (1, 4):
+            assert abs(got[k] - ref[k]) <= 1e-15 * abs(ref[k]), (scaler, k, got[k], ref[k])
 
 
 def _check_authors_build(store: str, reference: str):
