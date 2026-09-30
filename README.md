@@ -84,6 +84,22 @@ To reproduce the original C++/CPLEX numbers exactly, run on the solution file th
 python3 simulate.py 1 2 5 --store tests/data/store_cplex22-x86-seed395.out.gz
 ```
 
+### Getting a number that does not move with the solver
+
+`--value-function dp` uses the Bellman recursion on the same multipliers instead of the LP vertex's V. That is
+the paper's own definition (Section III-A, eq. 15); it is defined at every state, it is itself an optimal
+solution of the same LP, and because the multipliers agree across solvers to 2e-11 it gives the same answer
+whichever solver produced them.
+
+```bash
+python3 simulate.py 20 --value-function dp    # solver-independent
+python3 simulate.py 20 --value-function lp    # default: faithful to the C++ store file
+```
+
+The paper's Figure 4 claims MAI's deviation is under 3% for all h >= 30. On Case II that claim separates the
+two: the Bellman V gives 0.9-1.3% and passes, the CPLEX vertex V gives 5.3-6.6% and fails. See
+[REPRODUCTION.md](REPRODUCTION.md) and [VALUE_FUNCTION.md](VALUE_FUNCTION.md).
+
 ## Command-line options
 
 `gen.py` and `simulate.py` share these instance options:
@@ -104,6 +120,7 @@ python3 simulate.py 1 2 5 --store tests/data/store_cplex22-x86-seed395.out.gz
 | `--store FILE` | Use an existing solution file instead of solving the LP |
 | `--trajectory DIR` | Write step-by-step logs of every run (costs, agent positions, moves) |
 | `--no-write` | Print rows only; don't append to the output file |
+| `--value-function {lp,dp}` | Which V the MAI index reads: `lp` (default) the LP vertex's, as the C++ store file holds it; `dp` the Bellman recursion on the same multipliers |
 
 `gen.py --policy` also writes the LP's randomized policy (`store_lpPolicy-seed<seed>.out`). This is a Python-only
 extra that the C++ never reads.
@@ -139,6 +156,46 @@ simulation computes.
 
 [benchmarks.md](benchmarks.md) has results for scalers 1 to 100 and the Python-vs-C++ check
 at each point.
+
+## Documentation
+
+| Document | What it covers |
+|---|---|
+| [REPRODUCTION.md](REPRODUCTION.md) | What the paper's Section VI specifies, which parts are reproducible from the shared package, the per-case seeds, and how to run each figure |
+| [VALUE_FUNCTION.md](VALUE_FUNCTION.md) | Where the value function comes from, why the LP leaves most of it undetermined, and what that does to MAI |
+| [DECISIONS.md](DECISIONS.md) | A chronological log of how this was built: what was hit, what was chosen, and what each choice cost |
+| [DESIGN.md](DESIGN.md) | Every porting decision in detail, with the C++ behaviours reproduced on purpose |
+| [benchmarks.md](benchmarks.md) | Results for scalers 1 to 100, the Python-vs-C++ check, and the CPLEX solver-dependence study |
+
+## Reproducing the paper's three cases
+
+The paper runs I = 6, 10 and 14 areas ("Cases I, II, III"). The initial probabilities come from `rand()`, and
+the stream position depends on the area count, so each case needs its own seed. Searching for a placement that
+matches the paper's Table II (`tests/find_paper_seeds.py`) gives:
+
+| Case | Areas | Seed | Graph |
+|---|---:|---:|---|
+| I | 6 | 300 | `graph/adjacent_matrix_6.in` |
+| II | 10 | 395 | `graph/adjacent_matrix_10.in` |
+| III | 14 | 51 | `graph/adjacent_matrix_14.in` |
+
+All three match the paper's Table I (initial risk) and Table II (initial probabilities) exactly.
+
+Running the paper's Figure 4 h-grid on all three reproduces its claims: MAI's deviation is under 3%
+at every h >= 30, GRD stays flat and does not converge, and the 95% confidence intervals are within
++-3% of the mean (worst observed 0.91%).
+
+| h | Case I GRD / MAI | Case II GRD / MAI | Case III GRD / MAI |
+|---:|---:|---:|---:|
+| 1 | 12.05% / 7.58% | 14.73% / 8.42% | 15.54% / 7.63% |
+| 10 | 10.16% / 1.97% | 10.45% / 3.05% | 12.46% / 1.90% |
+| 30 | 9.76% / 1.42% | 10.19% / 1.83% | 12.24% / 0.98% |
+| 50 | 9.88% / 1.28% | 10.09% / 2.29% | 12.27% / 1.15% |
+
+Lower bounds 2613.70, 3407.97, 5333.08. Plot: `benchmarks/fig4.png` via `reproduce_fig4.py`.
+Figure 3 (a CDF over 1,000 random settings per case) is scripted in `reproduce_fig3.py` but not yet
+run; it is about a day on 8 cores. Full detail, including what cannot be reproduced from the shared
+package, is in [REPRODUCTION.md](REPRODUCTION.md).
 
 ## Repository layout
 
