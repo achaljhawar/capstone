@@ -569,11 +569,12 @@ project has measured. Nothing forbids a heuristic from performing non-monotonica
 > the exponent and the floor are properties of seeds 300 and 395, not of the method.** The claim that
 > generalises is the one Figure 4 makes — a large fall from h = 1 to h ≈ 20 in every instance.
 
-§8.7 supersedes this on the question it was trying to answer. On 200 settings with paired
-comparisons, the gap falls sharply to h ≈ 40 and then stops measurably: the local slope over
-55 ≤ h ≤ 100 is 0.001 ± 0.033 and half the settings get worse. That is the statement to quote; the
-single-instance subsections above are kept because they are how the question was found, and because
-§8.6's power analysis is the reason to distrust them.
+§8.7 supersedes this on the question it was trying to answer, and its answer is case-dependent: on
+200 settings with paired comparisons, Case I falls sharply to h ≈ 40 and then stops measurably
+(slope 0.001 ± 0.033 over 55–100, half the settings getting worse), while Case II pauses over 40–55
+and resumes at slope 0.563 ± 0.043. That pair is the statement to quote. The single-instance
+subsections above are kept because they are how the question was found, and because §8.6's power
+analysis is the reason to distrust them.
 
 The exponents (0.63–0.92) still should not be read as a √N law: that comparison needs the
 normalisations matched, and the simulator already divides cost by h.
@@ -683,8 +684,10 @@ the question: the across-instance spread at fixed h is several times any instanc
 the tail, so a per-instance comparison is read against the wrong yardstick. The fix is Figure 3's
 design — many random settings at each h — applied to the convergence question.
 
-Case I, **200 settings**, h ∈ {10, 20, 40, 55, 100}, 1,000 runs per policy per setting, one LP solve
-per setting reused across h (6,138 s on the Spark, `rc=0`). Case II is still running.
+Both cases, **200 settings** each, h ∈ {10, 20, 40, 55, 100}, 1,000 runs per policy per setting, one
+LP solve per setting reused across h (6,138 s and 13,004 s on the Spark, both `rc=0`).
+
+Case I (I = 6):
 
 | h | mean gap | SE | median | p10 | p90 | under 3% |
 |---:|---:|---:|---:|---:|---:|---:|
@@ -694,48 +697,79 @@ per setting reused across h (6,138 s on the Spark, `rc=0`). Case II is still run
 | 55 | 1.0915% | 0.1023% | 0.4881% | 0.1417% | 3.4262% | 88.5% |
 | 100 | 1.0789% | 0.1029% | 0.4631% | 0.1559% | 3.4001% | 89.0% |
 
+Case II (I = 10):
+
+| h | mean gap | SE | median | p10 | p90 | under 3% |
+|---:|---:|---:|---:|---:|---:|---:|
+| 10 | 1.1490% | 0.0711% | 0.7572% | 0.3793% | 2.7061% | 91.5% |
+| 20 | 0.9301% | 0.0687% | 0.5340% | 0.2209% | 2.3120% | 94.5% |
+| 40 | 0.8499% | 0.0669% | 0.4729% | 0.2225% | 2.2336% | 95.0% |
+| 55 | 0.8422% | 0.0671% | 0.4547% | 0.2246% | 2.1868% | 95.0% |
+| 100 | 0.7264% | 0.0662% | 0.3448% | 0.1133% | 2.0170% | 95.5% |
+
 The statistic that matters is **paired**: each setting is evaluated at every h from one LP solve and
 one seed, so a per-setting change carries none of the across-instance spread, and its standard error
 is far below that of a difference of ensemble means. That is why 200 settings suffices.
 
-| from | to | mean change | SE | t | p | settings improved | local slope |
-|---:|---:|---:|---:|---:|---:|---:|---:|
-| 10 | 20 | −0.2973% | 0.0133% | −22.43 | 2e−56 | 95.5% | 0.659 ± 0.037 |
-| 20 | 40 | −0.1024% | 0.0099% | −10.32 | 3e−20 | 82.0% | 0.264 ± 0.029 |
-| 40 | 55 | −0.0138% | 0.0126% | −1.10 | 0.27 | 53.5% | 0.092 ± 0.069 |
-| **55** | **100** | **−0.0126%** | **0.0150%** | **−0.84** | **0.40** | **49.0%** | **0.001 ± 0.033** |
-| 10 | 100 | −0.4261% | 0.0303% | −14.04 | 1e−31 | 94.0% | 0.291 ± 0.016 |
+| case | from | to | mean change | SE | t | p | improved | local slope |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| I | 10 | 20 | −0.2973% | 0.0133% | −22.43 | 2e−56 | 95.5% | 0.659 ± 0.037 |
+| I | 20 | 40 | −0.1024% | 0.0099% | −10.32 | 3e−20 | 82.0% | 0.264 ± 0.029 |
+| I | 40 | 55 | −0.0138% | 0.0126% | −1.10 | 0.27 | 53.5% | 0.092 ± 0.069 |
+| I | **55** | **100** | **−0.0126%** | 0.0150% | −0.84 | **0.40** | **49.0%** | **0.001 ± 0.033** |
+| I | 10 | 100 | −0.4261% | 0.0303% | −14.04 | 1e−31 | 94.0% | 0.291 ± 0.016 |
+| II | 10 | 20 | −0.2190% | 0.0103% | −21.22 | 5e−53 | 95.5% | 0.456 ± 0.025 |
+| II | 20 | 40 | −0.0802% | 0.0073% | −11.04 | 2e−22 | 78.5% | 0.158 ± 0.020 |
+| II | 40 | 55 | −0.0077% | 0.0108% | −0.71 | 0.48 | 56.0% | 0.057 ± 0.046 |
+| II | **55** | **100** | **−0.1158%** | 0.0086% | −13.47 | **8e−30** | **94.0%** | **0.563 ± 0.043** |
+| II | 10 | 100 | −0.4226% | 0.0189% | −22.34 | 4e−56 | 98.0% | 0.339 ± 0.016 |
 
-**On an ensemble of 200 settings, MAI's gap stops decreasing measurably past h ≈ 40.** From 55 to 100
-the mean paired change is −0.013% with a 95% interval of [−0.042%, +0.017%], **49.0% of settings
-improve** — a coin flip — and the local log-log slope is 0.001 ± 0.033, so decay faster than about
-h^−0.07 is excluded on the ensemble. The fall from h = 10 to 20 is meanwhile unmistakable: −0.30% at
-t = −22, 95.5% of settings improving, slope 0.66.
+**The two cases disagree about the tail, and that is the result.** Case I's gap stops decreasing
+measurably past h ≈ 40: from 55 to 100 the mean paired change is −0.013%, 95% interval
+[−0.042%, +0.017%], **49.0% of settings improve** — a coin flip — and the local slope is
+0.001 ± 0.033. Case II pauses over the same 40–55 window (p = 0.48, 56% improving) and then **resumes
+falling hard**: −0.116% from 55 to 100 at t = −13.5, 94% of settings improving, slope 0.563 ± 0.043.
 
-Three things follow, and one does not.
+An earlier version of this subsection, written when only Case I had finished, said "on an ensemble of
+200 settings, MAI's gap stops decreasing measurably past h ≈ 40". **Case II refutes that as a general
+statement** and the claim is now scoped to Case I. This is exactly the narrowing that §8.4 and §8.6
+needed and that I was warned to expect; it arrived one case later rather than one review later.
 
-**Case II's plateau was not exotic.** §8.4 found one instance flattening at 0.95% and §8.6 could not
-say whether that was typical, because 1,000 runs on six seeds lacked the power. The ensemble answers
-it: flattening past h ≈ 40 is what the *average* setting does. So §8.6's discarded sentence — "a
-non-falling tail is common" — appears to have been right in direction while resting on evidence that
-could not support it, which is a different thing from being right.
+Four things follow.
 
-**The paper's own regime is confirmed and is not where the plateau is.** Figure 4 plots h ≤ 50 and
-§4's claim is at h = 40; the strong decay this sweep measures sits entirely below h ≈ 40. Nothing here
-contradicts a result the paper states.
+**A flat window is not a plateau, and this is the measured demonstration.** §8.4 argues on logical
+grounds that no finite range can establish an asymptote, because a gap may be flat and then resume
+falling. Case II does precisely that *inside the measured range*: statistically flat over 40–55, then
+a slope of 0.56 over 55–100. The caveat is no longer hypothetical, and it retroactively justifies
+refusing to call Case II's single-instance 0.95% a floor — on the ensemble, the I = 10 case is still
+converging at h = 100.
 
-**The skew matters more than the mean.** The mean gap is 1.08% while the median is 0.46% and p90 is
-3.4%: a minority of hard settings carries the mean, and the fraction under 3% is flat at 88–89%
-throughout. Reporting only the mean would overstate the typical gap by more than a factor of two.
+**It corroborates the seed check rather than contradicting it.** §8.6 found every fresh I = 10 seed
+still falling through h = 100, against seed 395's flattening. The ensemble now says the same thing
+with 200 settings and a paired test: seed 395's plateau is that instance's, not the case's.
 
-**What does not follow is anything about Theorem 3.** §8.1 establishes that (40) has no finite-sample
-content, and 200 settings does not change that — a plateau across 55 ≤ h ≤ 100 is consistent with
-convergence resuming at any larger h. This is a statement about reachable h, which is the only kind
-available.
+**The paper's own regime is confirmed either way.** Figure 4 plots h ≤ 50 and §4's claim is at h = 40.
+Both cases fall steeply below h ≈ 40 — slopes 0.66 and 0.46 over 10–20 — and nothing here contradicts
+a result the paper states.
 
-One consistency check came free. The sweep's h = 40 rows share seeds 1–200 and every other setting
-with the committed Figure 3 run, and **all 200 rows are bit-identical in `mai`, `greedy` and
-`lower_bound`** — two runs hours apart, through the new `--h` code path, reproducing exactly.
+**The skew matters more than the mean.** Case I's mean gap is 1.08% against a median of 0.46% and p90
+of 3.4%; Case II's is 0.73% against 0.34% and 2.0%. A minority of hard settings carries both means,
+and the under-3% fraction is flat at 88–89% and 91–96% across all h. Reporting the mean alone
+overstates the typical gap by more than a factor of two.
+
+**What still does not follow is anything about Theorem 3.** §8.1 establishes that (40) has no
+finite-sample content, and 400 settings across two cases does not change that. Case II's resumption
+is the clearest available illustration of why.
+
+One consistency check came free. Case I's h = 40 rows share seeds 1–200 and every other setting with
+the committed Figure 3 run, and **all 200 rows are bit-identical in `mai`, `greedy` and
+`lower_bound`** — two runs hours apart, through the new `--h` code path, reproducing exactly. No such
+baseline exists for Case II, since Figure 3's Cases II and III were never run.
+
+Case III is not covered here either. On the Case II timing (13,004 s for I = 10) the I = 14 graph
+would be several hours, and the question this subsection asks has now been answered in both
+directions — one case flattening, one resuming — so a third case would add a data point rather than
+change a conclusion.
 
 ### 8.8 Provenance
 
@@ -929,6 +963,9 @@ python3 check_theorem3_seeds.py --dir benchmarks/theorem3_seeds --runs 1000
 python3 reproduce_fig3.py --case 1 --settings 200 --h 10,20,40,55,100 --jobs 18 \
     --out benchmarks/avg_sweep/case1_avg.csv
 python3 check_theorem3_avg.py --csv benchmarks/avg_sweep/case1_avg.csv
+python3 reproduce_fig3.py --case 2 --settings 200 --h 10,20,40,55,100 --jobs 18 \
+    --out benchmarks/avg_sweep/case2_avg.csv
+python3 check_theorem3_avg.py --csv benchmarks/avg_sweep/case2_avg.csv
 
 # section 10 -- Proposition 1's decomposition at fixed mu, joint vs per-area.  Self-contained:
 # builds its own two-area instance, consults no LP and no stored data.
