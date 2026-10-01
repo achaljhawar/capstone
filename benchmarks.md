@@ -21,8 +21,15 @@ rather than the single seed-395 instance, and on two other machines:
 | x86-64 | WSL Ubuntu 22.04, Python 3.10, NumPy 2.2.6, SciPy 1.15.3 |
 | aarch64 | NVIDIA DGX Spark (GB10, 20× Cortex-X925, 121 GB), Ubuntu 24.04, Python 3.12, same library versions |
 
-Section 7 is the check that this does not matter: with `--value-function dp` the two architectures
-give bit-identical policy costs. Note that the GPU is unused throughout — the LP is 3% of a run's
+Long runs go on the Spark, which is reachable two ways, and **both are worth knowing before one of
+them fails**: `100.101.143.122` over Tailscale, and `192.168.0.40` on the LAN, which needs no overlay
+when both machines are on `192.168.0.0/24`. A session was lost treating a one-directional Tailscale
+failure as evidence about the machine while the LAN address worked on the first attempt; the Spark had
+been up throughout, and had been reaching the host fine in the other direction. Jobs there go under
+`setsid nohup` so they survive the launching session, which they have done through a host reboot.
+
+Section 7 is the check that the architecture does not matter: with `--value-function dp` the two
+architectures give bit-identical policy costs. Note that the GPU is unused throughout — the LP is 3% of a run's
 time and the other 97% is a bit-exact reimplementation of glibc `rand()` consumed strictly in
 sequence, which is not GPU-shaped work.
 
