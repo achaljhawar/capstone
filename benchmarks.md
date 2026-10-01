@@ -273,47 +273,112 @@ Rows: `benchmarks/fig3_xcheck_local_s1.csv` (x86-64), `benchmarks/fig3_xcheck_sp
 One transfer caveat: copy result files with `scp` and check the md5, not with `ssh 'cat file' > local` —
 the latter silently corrupted a row in a 250-row CSV here.
 
-## 8. Theorem 3: is the convergence exponential?
+## 8. Theorem 3: what it claims, and what the data shows
 
-Section V-D (p. 24) states that the deviation from an optimal solution "diminishes exponentially in the
-scaling parameter h", presented as stronger than the O(√N) bound of the prior work it cites. It is a
-numerical claim, and nothing in this project tested it.
+Theorem 3 is titled "Exponential Convergence" and the surrounding prose says the deviation
+"diminishes exponentially in the scaling parameter h". Nothing in this project had tested that, so
+this section does — and the first two things it found were errors in the testing, not in the paper.
 
-What is measurable is deviation from the LP *lower bound*, not from the optimum:
+### 8.1 Two corrections to the premise
+
+**Γ^{h,∗} is the relaxed optimum, not the true optimum.** Page 22, immediately after equation (35):
+
+> define Γ^{h,∗} := min_{ϕ∈Φ̂h} Γ^{h,ϕ} as the minimum of the **relaxed** MAB-ML problem described in
+> (32) and (31)
+
+and the paper then notes "Γ^{h,∗} is a lower bound to the minimum of MAB-ML". So the quantity
+Theorem 3 bounds is the gap against the *relaxation* — which is exactly the lower bound these runs
+report. An earlier version of this section claimed the opposite: that only part of the measured
+deviation was theorem-bounded and the rest was an unobservable optimum-to-bound gap needing a floor
+term to absorb. That was wrong. On the theorem's own terms no floor is needed, and the gap we measure
+is the gap the theorem talks about.
+
+**The inequality does not pin down a rate.** Page 23, verbatim:
+
+> Theorem 3 (Exponential Convergence): If the MAB-ML process is strictly indexable and a policy
+> ϕ ∈ Φh satisfies (29), (30) and (38), then, for any δ > 0, there exist H > 0 and s > 0 such that,
+> for all h > H, Γ^{h,ϕ} − Γ^{h,∗} ≤ e^{−sh} + δ.  (40)
+
+Note the quantifier order: δ is chosen first, and H and s may depend on it. **Any** non-negative
+sequence converging to zero satisfies this — given δ, choose H beyond which the gap is below δ, and
+then any s > 0 works, because e^{−sh} > 0. A gap decaying like h^{−1/2} satisfies (40). So inequality
+(40) is equivalent to "the gap converges to zero" and does not establish an exponential rate, despite
+the theorem's title and the prose around it.
+
+That is a reading of the paper rather than a measurement, and it is the more substantial observation
+of the two. It also means **no curve fit can contradict Theorem 3** — the question a fit can answer
+is the narrower one of what the decay looks like over the h actually reachable.
+
+### 8.2 Method
+
+`analyse_theorem3.py` fits, by weighted least squares with A, C ≥ 0 and rate > 0:
 
 ```
-measured(h) = (cost(h) - bound)/bound
-            = (cost(h) - optimum)/bound  +  (optimum - bound)/bound
-               \___ what Theorem 3 bounds ___/   \___ the relaxation's gap ___/
+exponential   gap(h) = A exp(-k h) + C
+power law     gap(h) = A h^(-p)   + C
 ```
 
-The second term is not observable at scale, so every model fitted carries a free floor `C` to absorb
-it. `analyse_theorem3.py` fits an exponential and a power law, each with a floor, weighting points by
-their confidence intervals (the interval shrinks steeply with h, so an unweighted fit lets the noisy
-small-h points dominate) and comparing by AIC.
+Since Γ^{h,∗} is the relaxed optimum the gap should tend to zero, so **C = 0 is the model the theory
+implies**; C ≥ 0 free is reported as a sensitivity. Errors are Monte-Carlo standard errors, obtained
+from the reported 95% half-widths by dividing by the Student-t quantile — a half-width is not one
+sigma, and an earlier version treated it as one, understating χ² by t² ≈ 3.85×. With equal parameter
+counts AIC differences reduce to χ² differences, so that is what is reported, together with an
+absolute goodness-of-fit p: **a model can win the comparison and still describe the data badly.**
 
-On the existing Figure 4 data — h ≤ 50, 1,000 runs, 11 points, V = dp:
+### 8.3 Results, h ≤ 50, 1,000 runs per point
 
-| Case | exp. rate k | exp. R² | power exponent p | power R² | ΔAIC (exp − power) | Favours |
-|---|---:|---:|---:|---:|---:|---|
-| I | 0.2034 | 0.9744 | 0.6703 | 0.9976 | **+17.85** | power law |
-| II | 0.2870 | 0.9871 | 0.8025 | 0.9957 | **+8.61** | power law |
-| III | 0.2972 | 0.9837 | 0.8315 | 0.9933 | **+4.05** | power law |
+With C ≥ 0 free:
 
-The power law fits better in all three cases, with exponents clustering at 0.67–0.83 — the √N-ish
-regime the paper says it improves on.
+| Case | exp. χ² | power χ² | ΔAIC (exp − power) | power gof p |
+|---|---:|---:|---:|---:|
+| I | 28.15 | 5.70 | +22.45 | 0.68 |
+| II | 38.89 | 17.78 | +21.11 | 0.023 |
+| III | 65.73 | 45.49 | +20.24 | 3.0e-07 |
 
-This is a signal, not a verdict, and three things limit it:
+The power law wins all three. But two things qualify that into near-nothing.
 
-1. The fit is against the lower bound, so the floor absorbs an unknown and possibly h-dependent gap.
-   (§5 shows the relaxation is very tight at small scale, which is why the floor is believed small —
-   but that was h = 1 on three areas.) Case I's power-law floor comes out slightly **negative**
-   (−0.000476), which is physically impossible for a bound gap and suggests mild over-fit.
-2. The confidence intervals on this data are 10–26% of the decaying signal — too loose to call.
-3. Theorem 3 is asymptotic; h ≤ 50 may be below where it bites.
+**Case III rejects both models.** Its power-law goodness-of-fit is 3e-7 — winning the comparison
+while being an inadequate description of the data. Case II is marginal at 0.023. Only Case I is fit
+well by either curve.
 
-A denser sweep is running to settle it: h out to 100 on 13 log-spaced points at 10,000 runs each,
-which cuts the interval to roughly 6% of the signal. **The table above will be superseded by it.**
+**The preference lives entirely at the smallest scales.** Repeating the comparison with the low-h
+points dropped — a predefined check, since a convergence claim is about large h:
+
+| Case | h ≥ 1 | h ≥ 2 | h ≥ 10 |
+|---|---:|---:|---:|
+| I | +22.45 | +1.15 | **−0.42** |
+| II | +21.11 | +4.16 | **−1.13** |
+| III | +20.24 | +3.79 | **+1.69** |
+
+**At h ≥ 10 none of the three cases distinguishes the two models at all** (|ΔAIC| < 2 throughout, and
+two of three have flipped sign). The full-range result is driven by h = 1 — a single six-area system
+with one sub-area per area, which is the least asymptotic point available.
+
+### 8.4 What can honestly be said
+
+> Across h = 1–50, a power law with a non-negative floor fits the measured gap from the relaxed
+> optimum better than an exponential with the same form. The preference collapses once the smallest
+> scales are excluded and has reversed by h ≥ 10, and neither curve adequately describes Case III.
+> This is a description of behaviour at reachable scales. It is not evidence against Theorem 3, whose
+> stated inequality is satisfied by any gap converging to zero.
+
+The exponents from the full-range fits (0.69–0.83) should not be read as a √N law either: that
+comparison would need the normalisations matched, and the simulator already divides cost by h.
+
+Two limits remain open. `simulate.py` passes the same seed at each h and `sim.py` builds run seeds
+without h, so **errors across h may be correlated** while the weighting here assumes independence;
+settling it needs matched run-level costs, not these aggregate rows. And the theorem's premise is
+*strict indexability*, which §6 shows the shared code does not implement — small sensitivity to
+tie-breaking is not the same as establishing it.
+
+### 8.5 Provenance
+
+The two premise errors in 8.1, the half-width-as-sigma error, the AIC formula, and the h = 1
+dependence were all found in an independent review by Deepak of the
+first version of this section. Its corrected χ² figures and the tail-window numbers were reproduced
+exactly by the rewritten script, which is the cross-check that they agree. The review also confirmed
+that the gap-to-bound ratio transformation is unbiased, and that the negative floor the first version
+worried about was only 0.36 SE below zero — a non-issue, where the real problems lay elsewhere.
 
 ## Reproducing
 
@@ -348,8 +413,10 @@ python3 tests/check_lower_bound.py --agents 2
 python3 tests/measure_index_ties.py --case all
 python3 tests/measure_tiebreak_sensitivity.py --case 1 --scaler 40 --runs 60
 
-# section 8 -- the convergence-rate fits, over any directory of case<N>_sweep.out rows
-python3 analyse_theorem3.py --dir benchmarks/theorem3 --plot benchmarks/theorem3.png
+# section 8 -- the convergence-rate fits, over any directory of case<N>_sweep.out rows.
+# --runs must match the runs per point, since the standard errors are derived from the
+# reported 95% half-widths via the Student-t quantile.
+python3 analyse_theorem3.py --dir benchmarks/theorem3 --runs 10000 --plot benchmarks/theorem3.png
 ```
 
 `check_lower_bound.py` is a pass/fail test. The other three are measurements: they print tables and
