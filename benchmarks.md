@@ -314,8 +314,12 @@ then any s > 0 works, because e^{−sh} > 0. A gap decaying like h^{−1/2} sati
 the theorem's title and the prose around it.
 
 That is a reading of the paper rather than a measurement, and it is the more substantial observation
-of the two. It also means **no curve fit can contradict Theorem 3** — the question a fit can answer
-is the narrower one of what the decay looks like over the h actually reachable.
+of the two. It does not make (40) unfalsifiable, though, and an earlier version of this section
+overstated that. (40) is *equivalent* to "the gap converges to zero": if the gap tended to some
+c > 0, choosing δ = c/2 would require gap ≤ e^{−sh} + c/2 for all h > H, and since e^{−sh} → 0 the
+right-hand side eventually falls below c. So a fit can contradict (40) in exactly one way — by
+establishing a **nonzero asymptote** — and cannot contradict it by finding the wrong rate. §8.4
+measures that asymptote, which is where the one interesting result of this section turns out to be.
 
 ### 8.2 Method
 
@@ -333,53 +337,175 @@ sigma, and an earlier version treated it as one, understating χ² by t² ≈ 3.
 counts AIC differences reduce to χ² differences, so that is what is reported, together with an
 absolute goodness-of-fit p: **a model can win the comparison and still describe the data badly.**
 
-### 8.3 Results, h ≤ 50, 1,000 runs per point
+`analyse_theorem3.py` compares the two decay *shapes*. The quantity that actually bears on (40) is
+the asymptote, so `check_theorem3_floor.py` fits the floor on its own and reports it with a
+profile-likelihood 95% interval (Δχ² = 3.841) per tail window, plus a check that assumes neither
+curve: what the gap did between the two largest h, against what a C = 0 power law says it should
+have done. The two scripts are deliberately separate — one answers "which shape", the other answers
+"does it reach zero", and only the second is a claim about the paper.
 
-With C ≥ 0 free:
+### 8.3 Results, h ≤ 100, 10,000 runs per point
 
-| Case | exp. χ² | power χ² | ΔAIC (exp − power) | power gof p |
-|---|---:|---:|---:|---:|
-| I | 28.15 | 5.70 | +22.45 | 0.68 |
-| II | 38.89 | 17.78 | +21.11 | 0.023 |
-| III | 65.73 | 45.49 | +20.24 | 3.0e-07 |
+The numbers below come from a sweep of 39 points — 3 cases × h ∈ {1,2,3,5,7,10,14,20,28,40,55,75,100},
+10,000 runs each, `--value-function dp`, seeds 300/395/51 — run 18-way parallel on the Spark,
+06:02:27 → 07:48:14 on 2026-10-17, all 39 tasks exiting `rc=0`. It supersedes an earlier h ≤ 50,
+1,000-run version of this section; where the conclusions changed, they changed because those error
+bars were ~19% of the decaying signal and these are ~2–4%.
 
-The power law wins all three. But two things qualify that into near-nothing.
+MAI's deviation from the relaxed optimum, in per cent (SE 0.012–0.14):
 
-**Case III rejects both models.** Its power-law goodness-of-fit is 3e-7 — winning the comparison
-while being an inadequate description of the data. Case II is marginal at 0.023. Only Case I is fit
-well by either curve.
+| h | Case I | Case II | Case III |
+|---:|---:|---:|---:|
+| 1 | 8.43 | 7.48 | 6.81 |
+| 2 | 5.30 | 4.48 | 4.04 |
+| 3 | 4.00 | 3.45 | 2.96 |
+| 5 | 2.80 | 2.46 | 2.04 |
+| 7 | 2.13 | 2.05 | 1.53 |
+| 10 | 1.68 | 1.69 | 1.42 |
+| 14 | 1.33 | 1.40 | 0.87 |
+| 20 | 1.01 | 1.28 | 1.10 |
+| 28 | 0.80 | 1.15 | 0.58 |
+| 40 | 0.64 | 1.07 | 0.92 |
+| 55 | 0.50 | 1.02 | 0.39 |
+| 75 | 0.44 | 0.97 | 0.51 |
+| 100 | 0.34 | **0.99** | 0.31 |
 
-**The preference lives entirely at the smallest scales.** Repeating the comparison with the low-h
-points dropped — a predefined check, since a convergence claim is about large h:
+With C = 0, the asymptote the theory implies:
 
-| Case | h ≥ 1 | h ≥ 2 | h ≥ 10 |
-|---|---:|---:|---:|
-| I | +22.45 | +1.15 | **−0.42** |
-| II | +21.11 | +4.16 | **−1.13** |
-| III | +20.24 | +3.79 | **+1.69** |
+| Case | power-law χ²/dof | gof p | exponent | exponential χ²/dof | ΔAIC |
+|---|---:|---:|---:|---:|---|
+| I | 8.64/11 | 0.655 | 0.70 | 4189/11 | +4180 → power law |
+| II | 1009/11 | 1.8e−209 | 0.40 | 3869/11 | +2859 → power law |
+| III | 577/11 | 1.1e−116 | 0.63 | 3323/11 | +2746 → power law |
 
-**At h ≥ 10 none of the three cases distinguishes the two models at all** (|ΔAIC| < 2 throughout, and
-two of three have flipped sign). The full-range result is driven by h = 1 — a single six-area system
-with one sub-area per area, which is the least asymptotic point available.
+**Case I is now a clean positive result**: a pure power law h^−0.70 with no floor describes 13 points
+over two decades of h at goodness-of-fit p = 0.655, while the exponential is excluded at χ² = 4189.
+The margin is +4180, where the old data managed +22. The earlier finding that the preference
+*reversed* at h ≥ 10 (ΔAIC −0.42) does not survive the smaller error bars: the tail windows now read
++979, +478, +118, **+28.5** at h ≥ 1, 2, 5, 10. That reversal was a small-sample artefact, and the
+honest reading of the earlier section is that it could not tell — not that it had found the
+exponential.
 
-### 8.4 What can honestly be said
+Cases II and III reject C = 0 outright, for two different and more interesting reasons.
 
-> Across h = 1–50, a power law with a non-negative floor fits the measured gap from the relaxed
-> optimum better than an exponential with the same form. The preference collapses once the smallest
-> scales are excluded and has reversed by h ≥ 10, and neither curve adequately describes Case III.
-> This is a description of behaviour at reachable scales. It is not evidence against Theorem 3, whose
-> stated inequality is satisfied by any gap converging to zero.
+### 8.4 One case does not converge to the bound
 
-The exponents from the full-range fits (0.69–0.83) should not be read as a √N law either: that
-comparison would need the normalisations matched, and the simulator already divides cost by h.
+Fitting a floor and profiling it (95% interval from Δχ² = 3.841), per tail window:
 
-Two limits remain open. `simulate.py` passes the same seed at each h and `sim.py` builds run seeds
-without h, so **errors across h may be correlated** while the weighting here assumes independence;
-settling it needs matched run-level costs, not these aggregate rows. And the theorem's premise is
-*strict indexability*, which §6 shows the shared code does not implement — small sensitivity to
-tie-breaking is not the same as establishing it.
+| Case | window | floor C | 95% interval | exponent | χ²/dof | gof p |
+|---|---|---:|---|---:|---:|---:|
+| I | h ≥ 1 | 0.022% | [0, 0.060] | 0.71 | 7.6/10 | 0.668 |
+| I | h ≥ 20 | 0.008% | [0, 0.185] | 0.67 | 2.1/3 | 0.545 |
+| **II** | h ≥ 1 | **0.859%** | **[0.835, 0.880]** | 0.92 | 20.5/10 | 0.025 |
+| **II** | h ≥ 20 | **0.953%** | **[0.880, 0.985]** | 1.60 | 3.4/3 | 0.336 |
+| III | h ≥ 1 | 0.174% | [0.135, 0.210] | 0.74 | 524/10 | 3.0e−106 |
+| III | h ≥ 20 | 0.000% | [0, 0.075] | 0.66 | 388/3 | 8.8e−84 |
 
-### 8.5 Provenance
+**Case I's floor includes zero in every window. Case II's excludes it in every window**, and on the
+tail the floor-plus-power-law fit is good (p = 0.336) with the floor at 0.95%.
+
+A model-free version of the same thing, which does not depend on either curve. Between the two
+largest h, 75 and 100:
+
+| Case | what the gap did | what a C = 0 power law predicts |
+|---|---|---|
+| I | 0.436% → 0.343%, a fall of 0.094 ± 0.020 (**4.8σ**) | a fall of 0.080 — consistent |
+| II | 0.973% → 0.989%, a change of **−0.016 ± 0.018 (−0.9σ)** | a fall of 0.105 — **5.8σ away** |
+| III | 0.510% → 0.313%, a fall of 0.197 ± 0.020 (10.1σ) | a fall of 0.084 — falls faster |
+
+Case I is still descending at h = 100. **Case II is flat**: a third more h buys a change
+indistinguishable from zero, where decay to the bound would have required five sigma of improvement.
+
+Since §8.1 establishes that (40) is equivalent to the gap converging to zero, a genuine nonzero
+asymptote is the one thing a measurement here could hold against Theorem 3. Three reasons this is
+not yet that — each a limit of this reproduction rather than a defence of the paper:
+
+1. **The premise is not implemented.** (40) requires strict indexability, which §6 shows the shared
+   code does not provide: the ε perturbation of §V is absent, so `c(s,1,t) − c(s,0,t)` is identically
+   zero. A plateau in code that does not satisfy the hypothesis says nothing about the theorem. It
+   says something about the shared code, and a floor is exactly where a missing ε would show up.
+2. **One instance, one seed.** Each "case" here is a single random setting (Case II is seed 395),
+   not an ensemble. §8.6 ran that check and it is decisive: all three fresh I = 10 seeds keep falling,
+   so this floor is seed 395's and not the case's — while two of three fresh I = 6 seeds flatten and
+   one rises, so floors are common and the clean Case I fit is the atypical draw. Read §8.4 as a
+   statement about seed 395 only.
+3. **Correlated errors across h.** `simulate.py` passes the same seed at each h and `sim.py` builds
+   run seeds without h, so the points are not independent while the fit assumes they are. That
+   inflates the apparent significance of a smooth trend; it does not explain a flat tail.
+
+**Case III's residual structure is not noise.** Its gap is non-monotone at large h — 0.58% at 28,
+0.92% at 40, 0.39% at 55 — and with SEs near 0.02% those swings are 10–25σ, so no curve of either
+family can fit it, which is what χ² = 388 on 3 dof is reporting. The likely mechanism is already
+measured elsewhere in this document: each h is a separate LP solve, and §3 shows MAI's gap moving
+2.2%–6.9% on nothing but which vertex the solver returns. `dp` removes the solver's `V`, but the
+multipliers μ still come from that vertex, so vertex-to-vertex variation across h survives, and at
+I = 14 it evidently dominates. That makes Case III's fitted parameters uninterpretable, and is a
+more useful finding than the fit it invalidates.
+
+### 8.5 What can honestly be said
+
+> Over h = 1–100 at 10,000 runs per point, Case I's deviation from the relaxed optimum is described
+> by a pure power law h^−0.70 with no floor (gof p = 0.655), and an exponential is excluded by
+> Δχ² ≈ 4180. Case II instead flattens to a floor of 0.95% [0.88, 0.99] and is statistically flat
+> between h = 75 and h = 100, which over this range is inconsistent with convergence to the bound.
+> Case III decreases but non-monotonically by 10–25σ, consistent with the LP-vertex sensitivity of
+> §3, and is fit by neither family. None of this contradicts Theorem 3, whose premise of strict
+> indexability the shared code does not implement. **All three are single instances, and §8.6 shows
+> the spread across instances at h = 100 (0.006%–2.641%) dwarfs the h-dependence fitted within one:
+> the exponent and the floor are properties of seeds 300 and 395, not of the method.** The claim that
+> generalises is the one Figure 4 makes — a large fall from h = 1 to h ≈ 20 in every instance.
+
+The exponents (0.63–0.92) still should not be read as a √N law: that comparison needs the
+normalisations matched, and the simulator already divides cost by h.
+
+### 8.6 The seed check, which reframes all of the above
+
+Both graph sizes were re-run on three fresh seeds each at h = 20, 55, 100 (1,000 runs; 18 tasks, all
+`rc=0`, 12:48 → 12:55). The question was whether Case II's floor belongs to the instance or to the
+case size. The answer is neither of the two outcomes anticipated.
+
+| I | seed | h = 20 | h = 55 | h = 100 | 55 → 100 |
+|---:|---|---:|---:|---:|---|
+| 6 | **300** (Case I) | 1.012% | 0.504% | 0.343% | −0.161 — falling |
+| 6 | 301 | 2.378% | 2.494% | **2.641%** | **+0.148 (+3.7σ) — rising** |
+| 6 | 302 | 0.159% | 0.110% | 0.168% | +0.058 (+1.2σ) — flat |
+| 6 | 400 | 0.455% | 0.201% | 0.240% | +0.039 (+0.6σ) — flat |
+| 10 | **395** (Case II) | 1.282% | 1.018% | 0.989% | −0.029 — flat |
+| 10 | 396 | 0.523% | 0.202% | 0.140% | −0.062 (−1.0σ) — falling |
+| 10 | 397 | 0.422% | 0.220% | 0.134% | −0.087 (−1.4σ) — falling |
+| 10 | 500 | 0.248% | 0.141% | **0.006%** | −0.135 (−3.0σ) — falling |
+
+Two findings, and the second is the one that matters.
+
+**Case II's floor is seed 395's, not the I = 10 case's.** All three fresh I = 10 seeds keep falling
+through h = 100 and reach 0.006%–0.140%, lower than any point in the sweep. So §8.4 cannot be read as
+a property of the ten-area case.
+
+**But a non-decreasing tail is common, and the clean case is the unusual one.** In the I = 6 family —
+whose sweep seed produced the textbook h^−0.70 fit — two of three fresh seeds are flat from h = 55 to
+100 and one *rises* by 3.7σ to 2.641%. Four of the six fresh instances have a tail that is not
+falling. Seed 300's clean power law is one draw, not the typical behaviour, and §8.3's goodness-of-fit
+p = 0.655 describes that draw rather than the model class.
+
+**At h = 100 the gap ranges from 0.006% to 2.641% across eight instances — a factor of 400**, which is
+far larger than any h-dependence measured within an instance. That is the result the sweep really
+produced, and it has a mechanism already measured in §3: each h is a separate LP solve, and the vertex
+the solver returns moves MAI's gap by 2.2%–6.9% on its own. `dp` removes the solver's `V`, but μ still
+comes from the vertex, so every point in every one of these curves carries a per-h offset of the same
+order as the gap being fitted. Seed 301's *rising* gap and Case III's 10–25σ non-monotonicity are the
+same phenomenon seen twice.
+
+**Consequence for §8.3 and §8.4.** Both are single-instance measurements, and the instance-to-instance
+spread exceeds the effect they fit. Case I's exponent and Case II's floor should be read as properties
+of seeds 300 and 395, not of the method. Settling convergence per se needs the design Figure 3 already
+uses — averaging over many random settings at each h — rather than more h on one setting, and that is
+the natural next experiment rather than a deeper sweep.
+
+What survives unqualified: the gap falls substantially from h = 1 to h ≈ 20 in every instance measured
+(8.43% → 1.01% for seed 300, 7.48% → 1.28% for seed 395), which is the paper's qualitative claim and
+the regime Figure 4 plots. What does not survive is any single-instance statement about the asymptote.
+
+### 8.7 Provenance
 
 The two premise errors in 8.1, the half-width-as-sigma error, the AIC formula, and the h = 1
 dependence were all found in an independent review by Deepak of the
@@ -387,6 +513,13 @@ first version of this section. Its corrected χ² figures and the tail-window nu
 exactly by the rewritten script, which is the cross-check that they agree. The review also confirmed
 that the gap-to-bound ratio transformation is unbiased, and that the negative floor the first version
 worried about was only 0.36 SE below zero — a non-issue, where the real problems lay elsewhere.
+
+The h ≤ 100 sweep then changed two of the conclusions that review had helped establish, which is the
+point of running it: the h ≥ 10 reversals disappeared, having been small-sample noise, and the floor
+term — introduced in the first version for the wrong reason, demoted to a sensitivity in the second —
+turned out to be where the only theorem-relevant result lives. This is also the first version in
+which the floor is reported with an interval rather than a point estimate, which is what makes
+Case I's "includes zero" and Case II's "excludes zero" statable at all.
 
 ## 9. Proposition 2: the residual the package reports, and the one it should
 
@@ -465,7 +598,15 @@ python3 tests/measure_tiebreak_sensitivity.py --case 1 --scaler 40 --runs 60
 # section 8 -- the convergence-rate fits, over any directory of case<N>_sweep.out rows.
 # --runs must match the runs per point, since the standard errors are derived from the
 # reported 95% half-widths via the Student-t quantile.
-python3 analyse_theorem3.py --dir benchmarks/theorem3 --runs 10000 --plot benchmarks/theorem3.png
+python3 analyse_theorem3.py --dir benchmarks/theorem3_h100 --runs 10000 \
+    --plot benchmarks/theorem3_h100.png
+
+# sections 8.4 and 8.5 -- the floor, with an interval, and the model-free tail check.
+python3 check_theorem3_floor.py --dir benchmarks/theorem3_h100 --runs 10000
+
+# section 8.6 -- the same tails on fresh seeds, which is what shows that 8.3 and 8.4 are
+# single-instance results.  Reads benchmarks/theorem3_seeds/a<areas>_s<seed>.out.
+python3 check_theorem3_seeds.py --dir benchmarks/theorem3_seeds --runs 1000
 ```
 
 `check_lower_bound.py` is a pass/fail test. The other three are measurements: they print tables and
