@@ -83,6 +83,10 @@ At all 7 scalers above, the C++ program, run on the same store file, gives the s
 every column. That covers both averages, both confidence intervals,
 both adaption counts, both gaps, the lower bound and the slackness.
 
+Bit-exactness is agreement with the **code**, which is not the same as agreement with the **paper**:
+the shared implementation departs from its own paper in three places, and reproducing it faithfully
+means inheriting all three. §11 collects them and says which is which.
+
 ## 3. With a real CPLEX solution
 
 The sections above use LP solutions from HiGHS. To check the port against the authors' own setup, IBM CPLEX 22.2
@@ -954,6 +958,101 @@ joint version would price differently.
 Three areas is accepted by the script and impractical: 102³ product states against 36 joint actions
 does not finish in minutes. Two areas already credits −μ from a neighbour in both directions, which is
 the coupling at issue.
+
+## 11. Three places the shared code departs from its paper
+
+A reproduction can be faithful to the code or faithful to the paper, and where the two disagree it
+has to choose. This one chooses the code, so every departure below is **the shared implementation's,
+not the port's**. At each of these points the port has no divergence of its own: it reproduces the
+C++ bit for bit, including the defect. Collected here because they are scattered across the sections
+that measure them, and because "the port inherits this" and "the port gets this wrong" are different
+sentences.
+
+| | The paper | The shared code | Measured in | Effect |
+|---|---|---|---|---|
+| ε / strict indexability | §V attaches ε(i,j,s,a,t) > 0 to each cost rate, "crucial to determining the ranking of all the movements" | `costRateAAPair` ignores the action and the time | §6, §8 | ranking is 83–90% ties; Theorem 3's premise unmet |
+| heap comparator | — | not a strict weak ordering, so `std::make_heap` is UB | §6 | order depends on insertion sequence; ±0.05 points at 95% |
+| CI divisor | — | variance over *n*, Student-t at *n*−1 | here | ~0.05% on each half-width |
+
+### 11.1 The ε hook exists and is empty
+
+`stdafx.cpp:202`, in full:
+
+```cpp
+double AreaProcess::costRateAAPair(AreaState currentState, int moveIn, int time)
+{
+    Knowledge knowledge_current = knowledgeSet.at(currentState.indexOfKnowledge);
+    double p = knowledge_current.probability();
+
+    return p*100;	//normalize to avoid precision issue
+}
+```
+
+The signature takes `moveIn` and `time` — precisely the *a* and *t* of §V's ε(i,j,s,a,t) — and the body
+uses neither. The parameter slots for the perturbation are present and unused, which reads as a hook
+built and never filled rather than a possibility never considered.
+
+The consequence is structural, not cosmetic. MAI's index contains `c(s,1,t) − c(s,0,t)`; with this
+body that difference is identically zero, so the immediate-cost term drops out and the index reduces
+to `ϑ[t][to][state] − μ[t][from]`. §6 measures what that leaves: 83–90% of movements tied against
+*distinct* `(from, to, state)` triples, Case III collapsing 276.7 triples into 104.2 distinct values
+with a largest tie group of 603, and the comparator's own 1e-10 equality band swallowing even the
+values that are distinct — the smallest real gap on Case I is 8.9e-16, about 10⁵ times inside it.
+
+It also removes Theorem 3's hypothesis. The theorem assumes strict indexability, so nothing it proves
+is predicted *for this code*, which is why §8's convergence results are stated as findings about the
+shared implementation rather than as tests of the theorem.
+
+### 11.2 The comparator makes `make_heap` undefined
+
+`std::make_heap` requires a strict weak ordering. `stdafx.h:445` fails two of its requirements:
+near-equality within `EPSILON_PRECISION` is not transitive, so incomparability is not transitive; and
+`compare(m, m)` returns `true`, so the relation is not irreflexive.
+
+In practice the resulting order depends on the sequence movements were inserted in rather than on any
+key, which is why the port needed `heap_sort_cxx` to replicate `make_heap`'s internal steps instead
+of simply sorting: the order is an artefact of the algorithm, not of the comparison.
+
+### 11.3 The confidence-interval divisor
+
+`main.cpp:608`:
+
+```cpp
+boost::math::students_t dist(ITER_MAX-1);
+double T=quantile(complement(dist,0.025));
+double cv1,cv2;
+cv1 = sqrt(cv_average1/ITER_MAX) * T;
+```
+
+The variance is divided by *n* while the t-quantile takes *n*−1 degrees of freedom; the conventional
+pairing is *n*−1 with *n*−1. At n = 1,000 this is about 0.05% on the half-width. `patrol/sim.py`
+does the same thing, deliberately. This is the least consequential of the three — a convention rather
+than an error with teeth — but it is the reason the two CI columns in `tests/test_against_cpp.py` are
+compared at 1e-15 instead of exactly: Boost and SciPy disagree on the quantile at ~2e-16 relative,
+and the divisor convention is reproduced on both sides.
+
+### 11.4 What can and cannot be concluded from this
+
+**Can:** the shared package — the code and the outputs shipped with it — was produced without ε. The
+port reproduces `long-term-performance-cost.out` and the trajectory files bit for bit, so whatever
+built those artefacts had this `costRateAAPair`.
+
+**Cannot:** that the published figures came from this same build. The figure data is not in the
+package, so there is nothing to compare curve values against; the status table in the working notes
+keeps "published curve values" open for that reason. It is a reasonable inference, not a verified one,
+and it is worth keeping the distinction because the inference is the kind that would be embarrassing
+to have asserted if a later version of the code turned up with ε implemented.
+
+### 11.5 Why the corrections live in parallel files
+
+The C++ fixes are in `*_fixed.*` files marked `TIE-BREAK FIX`; `main.cpp`, `stdafx.cpp` and
+`stdafx.h` are untouched. Likewise `patrol/` keeps the faithful paths and the additions sit beside
+them.
+
+That is not only tidiness. Keeping both paths is what made the tie-break effect measurable at all: the
+±0.05-point bound in §6 comes from running the shipped ordering against four alternatives on paired
+seeds. Correcting the comparator in place would have left nothing to compare against and destroyed the
+bit-exactness evidence in the same edit.
 
 ## Reproducing
 
