@@ -43,3 +43,6 @@ VALUE_FUNCTION.md
 
 # Averaged-settings convergence rows (section 8.7): small, and cited in the prose.
 !benchmarks/avg_sweep/*.csv
+
+# 10,000-run seed rows (section 8.6b).
+!benchmarks/theorem3_seeds10k/*.out
