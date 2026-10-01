@@ -154,26 +154,28 @@ Section VI claims that for Case I at h = 40, MAI's deviation is under 3% in **ov
 generated settings. Each setting is one seed — its own LP solve plus 1,000 simulation runs per policy
 at each of five horizons.
 
-50 settings (seeds 1–50), Case I, `--value-function dp`, on the DGX Spark at 16-way parallelism;
-544 s wall.
+**1,000 settings** (seeds 1–1000) — the paper's stated sample size — Case I, `--value-function dp`,
+on the DGX Spark at 18-way parallelism; 9,323 s wall.
 
 | h | MAI median | MAI p75 | **MAI under 3%** | GRD median |
 |---:|---:|---:|---:|---:|
-| 1 | 5.11% | 6.09% | 22.0% | 7.89% |
-| 5 | 1.69% | 2.38% | 88.0% | 7.40% |
-| 10 | 1.04% | 1.51% | 90.0% | 7.29% |
-| 20 | 0.59% | 1.08% | 90.0% | 7.12% |
-| 40 | **0.46%** | 0.92% | **90.0%** | 7.25% |
+| 1 | 4.35% | 5.74% | 21.0% | 7.81% |
+| 5 | 1.49% | 2.25% | 87.0% | 6.85% |
+| 10 | 0.93% | 1.55% | 91.5% | 6.64% |
+| 20 | 0.60% | 1.22% | 92.7% | 6.53% |
+| 40 | **0.41%** | 1.03% | **92.8%** | 6.45% |
 
-**The claim holds, at 90% against the stated 75%**, and with margin — the 75th percentile of the
-deviation is 0.92%, well inside 3%. The two qualitative features of the figure also reproduce: MAI's
-distribution marches left and steepens as h grows (22% → 88% under 3% between h = 1 and h = 5, then
-flat), while GRD sits near 7.1–7.9% at every h and converges to nothing.
+**The claim holds, at 92.8% against the stated 75%**, with the 75th percentile of the deviation at
+1.03% — well inside 3%. The two qualitative features of the figure also reproduce: MAI's distribution
+marches left and steepens as h grows (21% → 87% under 3% between h = 1 and h = 5, then flat), while
+GRD sits near 6.5–7.8% at every h and converges to nothing.
 
-Sample size was never the binding constraint here: at n = 50 the proportion is 90% ± 8.3% (95%),
-clear of 75%. A 1,000-setting run at the paper's stated sample size is in progress on the same seeds.
+A 50-setting pilot run first on the same seeds gave 90.0% at h = 40, against 92.8% here; sample size
+was never the binding constraint, since even n = 50 puts the proportion at 90% ± 8.3% (95%), clear of
+75%. The full run was worth doing to match the paper's stated protocol exactly, not to rescue the
+conclusion.
 
-CDF: `benchmarks/fig3_pilot.png`, drawn by `plot_fig3.py` from the CSV.
+CDF: `benchmarks/fig3.png`, drawn by `plot_fig3.py` from the CSV.
 
 ## 5. Is the lower bound a lower bound?
 
@@ -444,9 +446,9 @@ python3 benchmarks/plot.py
 Sections 4–8 are reproduced by their own scripts, all run from `python/`:
 
 ```bash
-# section 4 -- Figure 3, Case I: the 75% claim (50 settings ~ 9 min on 16 cores)
-python3 reproduce_fig3.py --case 1 --settings 50 --jobs 16 --out benchmarks/fig3_pilot_case1.csv
-python3 plot_fig3.py --csv benchmarks/fig3_pilot_case1.csv --out benchmarks/fig3_pilot.png
+# section 4 -- Figure 3, Case I: the 75% claim (1,000 settings ~ 2.6 h on 18 cores)
+python3 reproduce_fig3.py --case 1 --settings 1000 --jobs 18 --out benchmarks/fig3_case1_full.csv
+python3 plot_fig3.py --csv benchmarks/fig3_case1_full.csv --out benchmarks/fig3.png
 
 # section 5 -- the lower bound against an exact joint DP (~1 min each; exits non-zero on failure)
 python3 tests/check_lower_bound.py

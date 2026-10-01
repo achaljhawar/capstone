@@ -162,7 +162,7 @@ def main() -> int:
                  color=INK, fontsize=12.5, x=0.012, ha="left", y=0.985)
     fig.text(0.012, 0.935, "over randomly generated settings, by horizon h",
              color=INK2, fontsize=10)
-    fig.text(0.012, 0.012, f"{n} settings per case; 1,000 simulation runs per policy per setting; "
+    fig.text(0.012, 0.012, f"{n:,} settings per case; 1,000 simulation runs per policy per setting; "
                            f"dotted lines mark 3% deviation and the 75% level",
              color=INK3, fontsize=8.5)
     fig.tight_layout(rect=(0, 0.035, 1, 0.92))
