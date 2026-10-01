@@ -192,9 +192,20 @@ formulation — so an error in the relaxation itself would sit in both and show 
 agent type, h = 1, solved **exactly** by backward induction over the full joint state space
 (knowledge vector × occupancy), with the agent-movement constraint — the one the relaxation drops —
 enforced rather than relaxed. With T small the reachable knowledge is small, so the recursion is
-exact: no sampling, no truncation. It reads only the dynamics and never consults the LP.
+exact: no sampling, no truncation. It never consults `lp.py`.
 
-| Instance | LP bound | Exact optimum | Slack | Greedy | MAI |
+**But "an error in the relaxation would sit in both and show up as nothing" overstates the scope, and
+review caught it.** `exact_optimum` takes `AreaProcess.next_states` and `ap.cost` from
+`patrol/model.py`, which is also where `build_and_solve` gets its rows. The test is independent of
+the *LP formulation*, not of the *model*: an error in the dynamics or the cost rate cancels and stays
+invisible here. What it does catch is a mis-stated relaxation on top of a correct model, which is
+what it was built for.
+
+The two policy columns below are sample means at `--runs 500`, not the script's 2,000 default; at the
+default they read 600.111 / 589.618 and 753.353 / 731.767. The first four columns are deterministic
+and reproduce to every digit at any run count.
+
+| Instance | LP bound | Exact optimum | Slack | Greedy (500 runs) | MAI (500 runs) |
 |---|---:|---:|---:|---:|---:|
 | 1 agent, T = 4 | 589.2532 | 589.3433 | +0.02% | 599.800 | 589.428 |
 | 1 agent, T = 5 | 731.1051 | 731.4471 | +0.05% | 753.128 | 732.036 |
@@ -234,7 +245,12 @@ calls two indices equal within `EPSILON_PRECISION` = 1e-10 and then falls back t
 Case I the smallest gap between values counted as *distinct* is 8.9e-16, about 10⁵ times **inside** that
 band. So the comparator treats even more as tied than the table shows. (That fallback is also not a
 strict weak ordering, since near-equality is not transitive, which is why `make_heap` can return an
-order that depends on insertion sequence rather than on any key.)
+order that depends on insertion sequence rather than on any key. It fails a more basic requirement
+too: `compare(m, m)` returns **true**, so the relation is not irreflexive even for exactly equal
+indices. That is inherited rather than introduced — `stdafx.h:445` returns `true` whenever the index
+difference is within EPSILON_PRECISION and the `fromArea_id` difference is not negative, which
+includes a movement compared with itself — so the port keeps it, and passing such a comparator to
+`std::make_heap` is undefined behaviour in the original.)
 
 ### Whether that changes the result
 
@@ -252,10 +268,25 @@ the tie-break and not Monte-Carlo noise. Case I, h = 40, 60 runs per rule, lower
 | construction order shuffled #3 | 2616.55 | 0.11% |
 | **spread** | **0.73** | **0.03 pts** |
 
-The ranking is overwhelmingly ties, and resolving them differently moves MAI's deviation by 0.03
-percentage points — against the whole percentage points that the choice of LP vertex moves it by (§3).
-Movements that tie are tied because they carry equal marginal value, so exchanging them costs about
-what the equality implies.
+The ranking is overwhelmingly ties, and resolving them differently moves MAI's deviation by about
+0.03 percentage points. Movements that tie are tied because they carry equal marginal value, so
+exchanging them costs about what the equality implies.
+
+**That 0.03 is a null result at this sample size, not a measured effect, and the script's own claim
+about it was wrong.** It closed by saying the runs are paired on seeds "so the spread is the
+tie-break's effect and not noise". Review computed the paired per-run standard error the script never
+reports: each rule's difference from the shipped order is +0.26 ± 0.64, −0.47 ± 0.62, −0.29 ± 0.65
+and +0.02 ± 0.63 cost units — **0.03σ to 0.76σ, every one indistinguishable from zero.** The paired SE
+is 0.024 points against a reported spread of 0.028, so the measurement's resolution is the size of
+the number it reports. Pairing is doing real work — it cuts the SE roughly ninefold, which is why the
+five values look so tidy — but not enough to resolve the effect.
+
+So the honest form is a bound rather than a value: **tie-break choice moves MAI's deviation by no
+more than about ±0.05 points at 95% confidence.** That is still an order of magnitude below the
+quantities §8 is concerned with, so the conclusion survives, but the earlier comparison against §3's
+"whole percentage points" does not: §3's spread is a `V`-off-support effect, and §8 runs `dp`, which
+rebuilds V from μ — and §3 found μ agreeing to 2e-11. Settling it needs 1,000 runs per rule, or just
+reporting the paired SE the script already has in hand.
 
 The paper also never gives ε: "appropriately attaching a sufficiently small" ε is an existence
 argument, not a specification, so ε cannot be reproduced from the paper even in principle. It remains a
@@ -279,8 +310,15 @@ both, compared column by column over all five horizons.
 
 Both policies' simulated costs are **bit-identical across the two architectures** at every h. The only
 thing that moves is the LP objective's last bit — about one ulp — and the deviation columns inherit it.
-MAI matching exactly means the value function, the index ranking and every movement decision agreed on
-both machines.
+
+An earlier version added that MAI matching exactly "means the value function, the index ranking and
+every movement decision agreed on both machines". **That does not follow and has been removed.** Equal
+aggregate costs do not identify the internals: in particular the simulator charges the current
+knowledge before transitioning, so a movement chosen in the final period cannot affect the total, and
+two machines could differ there and still report the same mean to the last bit. What the files
+establish is equality of the reported means for this experiment, which is what the architecture
+question needed. Verifying the stronger statement would mean comparing `V` directly and hashing the
+rankings and chosen movements along matched trajectories — worth doing, not done.
 
 Rows: `benchmarks/fig3_xcheck_local_s1.csv` (x86-64), `benchmarks/fig3_xcheck_spark_s1.csv` (aarch64).
 
@@ -325,7 +363,15 @@ overstated that. (40) is *equivalent* to "the gap converges to zero": if the gap
 c > 0, choosing δ = c/2 would require gap ≤ e^{−sh} + c/2 for all h > H, and since e^{−sh} → 0 the
 right-hand side eventually falls below c. So a fit can contradict (40) in exactly one way — by
 establishing a **nonzero asymptote** — and cannot contradict it by finding the wrong rate. §8.4
-measures that asymptote, which is where the one interesting result of this section turns out to be.
+measures what can be measured instead, which is a local decay rate.
+
+The equivalence needs two side conditions, and both are load-bearing rather than decorative. **The
+gap must be non-negative**, or the ⇒ direction fails — a gap running to −∞ satisfies (40) without
+converging — and it is non-negative only because Γ^{h,∗} minimises over Φ̂h ⊇ Φh, which is exactly
+the correction in the first half of this subsection. The two halves of §8.1 therefore depend on each
+other. **And ϕ must be read as a family ϕ_h ∈ Φh**, since the statement places ϕ outside the "for all
+h > H" while Φh is itself indexed by h. That reading is forced and is the one the simulation
+implements, but it is an interpretation of the printed statement, not a quotation of it.
 
 ### 8.2 Method
 
@@ -394,7 +440,7 @@ exponential.
 
 Cases II and III reject C = 0 outright, for two different and more interesting reasons.
 
-### 8.4 One case does not converge to the bound
+### 8.4 One case stops decreasing measurably
 
 Fitting a floor and profiling it (95% interval from Δχ² = 3.841), per tail window:
 
@@ -413,27 +459,73 @@ tail the floor-plus-power-law fit is good (p = 0.336) with the floor at 0.95%.
 A model-free version of the same thing, which does not depend on either curve. Between the two
 largest h, 75 and 100:
 
-| Case | what the gap did | what a C = 0 power law predicts |
+| Case | what the gap did | against the full-range C = 0 power law |
 |---|---|---|
-| I | 0.436% → 0.343%, a fall of 0.094 ± 0.020 (**4.8σ**) | a fall of 0.080 — consistent |
-| II | 0.973% → 0.989%, a change of **−0.016 ± 0.018 (−0.9σ)** | a fall of 0.105 — **5.8σ away** |
-| III | 0.510% → 0.313%, a fall of 0.197 ± 0.020 (10.1σ) | a fall of 0.084 — falls faster |
+| I | 0.436% → 0.343%, a fall of 0.094 ± 0.020 (**4.8σ**) | predicts 0.080 — consistent |
+| II | 0.973% → 0.989%, a change of **−0.016 ± 0.018**, i.e. none detectable | predicts 0.105; the gap at h = 100 sits **6.7σ** above the prediction |
+| III | 0.510% → 0.313%, a fall of 0.197 ± 0.020 (10.1σ) | predicts 0.084 — falls faster |
+
+Two corrections to how that table was first presented. It was labelled "model-free", which it is not:
+the prediction comes from the C = 0 power law fitted over the full range, and for Case II that fit was
+rejected at χ² = 1009, so the comparison is against a model this document discards. And the figure
+quoted for Case II was 5.8σ, obtained by dividing the *predicted* drop by the standard error without
+subtracting the observed one; the discrepancy statistic is 6.7σ. Neither is a calibrated test, since
+it ignores uncertainty in the fitted exponent and any cross-h dependence. The column that needs no
+model is the middle one: **Case II's change is 0.9 SE, so nothing is detectable either way.**
 
 Case I is still descending at h = 100. **Case II is flat**: a third more h buys a change
 indistinguishable from zero, where decay to the bound would have required five sigma of improvement.
 
-Since §8.1 establishes that (40) is equivalent to the gap converging to zero, a genuine nonzero
-asymptote is the one thing a measurement here could hold against Theorem 3. Three reasons this is
-not yet that — each a limit of this reproduction rather than a defence of the paper:
+§8.1 establishes that (40) is equivalent to the gap converging to zero. An earlier version of this
+subsection drew the corollary that a nonzero asymptote is "the one thing a measurement could hold
+against Theorem 3", and **that is still over-read: an asymptote is a property of the infinite
+sequence, and no finite window establishes one.** A gap can be flat across 75 ≤ h ≤ 100, resume
+falling at h = 10³, and converge to zero. **(40) has no finite-sample content at all** — not a weaker
+kind of content — so this subsection is not "where the only theorem-relevant result lives", and no
+sweep can make it so.
+
+Two independent reviews reached that conclusion, and one supplied the counterexample that makes it
+concrete. On the same six Case II tail points, the three-parameter model
+
+```
+g(h) = 0.313856 (h/20)^-1.693553 + 0.972450 (h/20)^-0.01
+```
+
+**tends to zero** and fits with χ² = 3.533 against the floor model's 3.384. A term decaying like
+h^-0.01 changes by a factor of 1.016 between h = 20 and h = 100, so over any reachable range it is
+indistinguishable from a constant. No finite sweep can separate "has a floor" from "has a term that
+decays arbitrarily slowly", which means **the floor is a parameter of a chosen family, not a measured
+asymptote.** The interval [0.88, 0.99] is narrow uncertainty *within* that family and says nothing
+about convergence. (Convergence can also fail without any limit existing, which a floor model cannot
+express at all.) Settling it needs an asymptotic argument or an independently justified model family;
+more h narrows which alternatives survive but never closes the gap.
+
+**What survives is a local decay rate, which is a real finite-h quantity and stronger than "flat".**
+Between h = 75 and h = 100 the log-log slope is
+
+```
+p_local = -0.057 +- 0.064        95% CI [-0.183, +0.069]
+```
+
+so over that octave Case II's gap decays no faster than about h^-0.07, against h^-0.70 for Case I
+over the same range. That is a defensible contrast between two instances at reachable h, it makes no
+claim about any limit, and it is what this subsection should be read as establishing. The floor
+language is retained below only because the fitted floor is what the scripts report and because the
+interval's *narrowness* is the thing most likely to mislead a reader.
+
+Three further limits, each of this reproduction rather than of the paper:
 
 1. **The premise is not implemented.** (40) requires strict indexability, which §6 shows the shared
    code does not provide: the ε perturbation of §V is absent, so `c(s,1,t) − c(s,0,t)` is identically
    zero. A plateau in code that does not satisfy the hypothesis says nothing about the theorem — it
    is a result about the shared code. It is tempting to go further and call a floor the place a
    missing ε would show up, but **the evidence available points the other way**: §6 measures the
-   whole tie-break sensitivity at 0.03 points, thirty times smaller than this 0.95% floor, so
-   whatever the floor is, resolving ties differently does not reach it. That bound is indirect — a
-   true ε shifts index values and not merely tie order — but it is the only measurement there is,
+tie-break sensitivity as **bounded at roughly ±0.05 points per rule at 95%**, about twenty times
+   below this 0.95% floor, so whatever the floor is, resolving ties differently does not reach it.
+   Two caveats on that bound, both from review: the originally quoted "0.03 points" is a spread that
+   sits inside its own paired noise floor (§6), so the thirty-fold ratio was an artefact of where
+   that floor happens to lie rather than a measurement; and the bound is indirect, since a
+   true ε shifts index values and not merely tie order. It remains the only measurement there is,
    and it does not support blaming ε.
 2. **One instance, one seed.** Each "case" here is a single random setting (Case II is seed 395),
    not an ensemble. §8.6 ran that check and it is decisive: all three fresh I = 10 seeds keep falling,
@@ -444,14 +536,25 @@ not yet that — each a limit of this reproduction rather than a defence of the 
    run seeds without h, so the points are not independent while the fit assumes they are. That
    inflates the apparent significance of a smooth trend; it does not explain a flat tail.
 
-**Case III's residual structure is not noise.** Its gap is non-monotone at large h — 0.58% at 28,
-0.92% at 40, 0.39% at 55 — and with SEs near 0.02% those swings are 10–25σ, so no curve of either
-family can fit it, which is what χ² = 388 on 3 dof is reporting. The likely mechanism is already
-measured elsewhere in this document: each h is a separate LP solve, and §3 shows MAI's gap moving
-2.2%–6.9% on nothing but which vertex the solver returns. `dp` removes the solver's `V`, but the
-multipliers μ still come from that vertex, so vertex-to-vertex variation across h survives, and at
-I = 14 it evidently dominates. That makes Case III's fitted parameters uninterpretable, and is a
-more useful finding than the fit it invalidates.
+**Case III's residual structure is not noise, and the mechanism is not the one this section first
+claimed.** Its gap is non-monotone at large h — 0.58% at 28, 0.92% at 40, 0.39% at 55 — and with SEs
+near 0.02% those swings are 10–25σ, so no curve of either family fits it, which is what χ² = 388 on
+3 dof reports. That part stands.
+
+The explanation first given here was §3's vertex lottery: separate LP solve per h, μ from whichever
+vertex was returned. **That is false, and checkably so.** `solve_relaxed(inst)` takes no h,
+`patrol/lp.py` mentions neither h nor the scaler, and both `simulate.py` and `reproduce_fig3.py`
+solve once *before* the h loop. The relaxation is h-independent, so every h in a sweep uses the same
+LP solution — and across separate processes, the same deterministic solver on identical input returns
+the same vertex. Vertex variation across h does not exist to be a mechanism. The review that found
+this also ran a pilot holding one solution object fixed across h and reproduced the rise-and-fall
+pattern, which is the direct confirmation.
+
+So the non-monotonicity is real and **unexplained**. The candidate worth testing is the tie structure:
+h multiplies the sub-areas, §6 shows 83–90% of the ranking is ties between distinct triples with the
+largest group at 603 movements for Case III, and the comparator resolves those by `from_area` rather
+than by any property of the decision. How that resolution interacts with h is not something this
+project has measured. Nothing forbids a heuristic from performing non-monotonically in h.
 
 ### 8.5 What can honestly be said
 
@@ -488,19 +591,53 @@ case size. The answer is neither of the two outcomes anticipated.
 
 Two findings, and the second is the one that matters.
 
-**Case II's floor is seed 395's, not the I = 10 case's.** All three fresh I = 10 seeds keep falling
-through h = 100 and reach 0.006%–0.140%, lower than any point in the sweep. So §8.4 cannot be read as
-a property of the ten-area case.
+**Case II's floor is seed 395's, not the I = 10 case's — but this is carried by one seed, not three.**
+The fresh I = 10 seeds end at 0.006%–0.140%, below any point in the sweep, and an earlier version read
+that as "all three keep falling". Two of those three are −1.0σ and −1.4σ, **the same evidential
+strength this section distrusts when the sign is positive.** A power calculation makes the problem
+explicit: against a reference h^−0.70 decay, seeds 302, 400, 396 and 397 have **12–22% power** at
+α = 0.05 to tell a plateau from textbook convergence, and seeds 396 and 397 sit 0.1σ and −0.2σ from
+the h^−0.70 prediction — consistent with convergence *and* with a plateau. Only seed 301 (rising,
+25σ from decay) and seed 500 (falling, 3.0σ) have a resolved direction. So the conclusion stands on
+seed 301 alone, which is enough for it, and the "all three" phrasing was the mirror of the error
+corrected below.
 
-**But a non-decreasing tail is common, and the clean case is the unusual one.** In the I = 6 family —
-whose sweep seed produced the textbook h^−0.70 fit — two of three fresh seeds are flat from h = 55 to
-100 and one *rises* by 3.7σ to 2.641%. Four of the six fresh instances have a tail that is not
-falling. Seed 300's clean power law is one draw, not the typical behaviour, and §8.3's goodness-of-fit
-p = 0.655 describes that draw rather than the model class.
+**The direction of the tail is mostly undetermined at this sample size, and an earlier version of
+this paragraph read the undetermined ones asymmetrically.** It said "four of the six fresh instances
+have a tail that is not falling". That was wrong twice over. The count is **three positive and three
+negative**, not four and two. And of the six, only two changes are significant — seed 301 rising
+(+3.7σ) and seed 500 falling (−3.0σ), one in each direction. The other four have 95% intervals
+spanning zero:
 
-**At h = 100 the gap ranges from 0.006% to 2.641% across eight instances — a factor of 400**, which is
-far larger than any h-dependence measured within an instance. That is the result the sweep really
-produced.
+| seed | change, h = 55 → 100 | 95% interval, points |
+|---|---:|---|
+| 302 | +0.0585 | [−0.0370, +0.1539] |
+| 400 | +0.0386 | [−0.0880, +0.1652] |
+| 396 | −0.0622 | [−0.1869, +0.0625] |
+| 397 | −0.0865 | [−0.2107, +0.0376] |
+
+Calling the two positive ones "flat" while calling the two negative ones "falling" applied a
+significance rule in one direction only, and the direction was not random: each reading resolved in
+favour of whatever the surrounding sentence was arguing. With 1,000 runs per point the resolution is
+too coarse to classify any of them, and declaring a tail flat needs an equivalence margin stated in
+advance, which this check did not have.
+
+**What would fix it is more runs on these six seeds, not more seeds and not more h.** At 1,000 runs
+the detectable plateau threshold is gap(55) ≥ 0.33%–0.53% depending on the seed, and four of the six
+instances sit two to five times below that — the design is blind by construction. At 10,000 runs the
+threshold falls to 0.11%–0.17%, which brings all four inside.
+
+What the check does support: seed 300's clean power law is one draw of eight, and §8.3's
+goodness-of-fit p = 0.655 describes that draw rather than the model class.
+
+**At h = 100 the gap ranges from 0.006% to 2.641% across eight instances — a spread of 2.64
+percentage points.** An earlier version called this "a factor of 400", which is the ratio to seed
+500's 0.00572% ± 0.02733% — a denominator smaller than its own standard error, so the ratio is
+meaningless and is reported as a difference here instead. The same version claimed the spread exceeds
+any within-instance h effect; it does not. Seed 300 falls 8.09 points from h = 1 to h = 100, which is
+larger. The defensible comparison is against the *tail*: over 20 ≤ h ≤ 100 no instance's gap ranges by more
+than 0.79 points (Case III; the six fresh seeds span 0.06–0.38), so across instances at fixed h the
+spread is several times the tail variation within one.
 
 Two distinct effects are easy to run together here, and an earlier version of this paragraph did run
 them together by attributing both to §3's vertex lottery. Keeping them apart:
@@ -575,9 +712,42 @@ contrast is visible rather than asserted:
 
 The check is on the **individual** gradients, not their weighted sum. A sum near zero can be
 cancellation between large terms; every gradient at machine epsilon means each constraint in (23) is
-satisfied on its own, which is the actual content of the proposition.
+satisfied on its own. That was once described here as "the actual content of the proposition", which
+the retraction below corrects: it is the content of dual feasibility, and the proposition says more.
 
-**Proposition 2 holds on all three paper cases and on the package's own instance.** It is a claim of
+**This section's headline claim is withdrawn.** It read "Proposition 2 holds on all three paper cases
+and on the package's own instance — a claim of the paper verified from the shared material alone".
+Both reviews rejected it, and the second gave the structural reason, which is worse than the first's.
+
+`AgentLP.policy` is built from `duals` at `patrol/lp.py:116` — the row duals of the printed LP,
+normalised into occupation measures. The printed LP's columns are V and μ, so its dual's rows are
+flow conservation (from the V columns) and `E[agent present] − E[agents moving in] = 0` (from the μ
+columns) — which is *exactly* what `agent_gradients_randomized` recomputes. So `max|gradient| ≈ 5e-16`
+restates "the solver returned a dual-feasible optimal pair". **LP duality guarantees it for any LP,
+and it carries no information about this paper.** It is a solver sanity check, and a real one, since
+the forward propagation is recomputed from `next_states` rather than read back off the dual — a
+flow-infeasible dual would show. But that is all it is.
+
+This is the same error found and written up at `patrol/lp.py:207` for Proposition 1, left standing
+three sections earlier, and the difference between the two is instructive: the Proposition 1 version
+yielded "the one unclaimed verification left", while this one yielded "a claim of the paper
+verified". The error survived where the conclusion was comfortable.
+
+Proposition 2's actual content is that the relaxed optimum is attained by a mixture of **threshold**
+policies (eqs 21–22). Neither `check_proposition2.py` nor `gradients.py` examines threshold structure
+anywhere. The first review added an independent demonstration that the criterion is not even
+sufficient for optimality:
+on the three-area, T = 4 instance of `tests/check_lower_bound.py`, the policy "every agent stays
+put" also has a maximum absolute randomized gradient of exactly zero, so it passes this test — and
+its exact expected cost is 590.0115, above both the relaxed optimum 589.2532 and the true optimum
+589.3433. Zero gradients are therefore a **necessary** condition, expressing flow feasibility, and
+not sufficient for the optimality or the threshold structure Proposition 2 asserts. Completing the
+check means additionally verifying that the support of the chosen actions satisfies the Bellman
+threshold conditions, and propagating the mixture's expected cost to confirm it equals the relaxed
+bound. Neither is done, and nothing here suggests the LP-returned policy is wrong — only that this
+test cannot distinguish it from policies that are.
+
+The residual contrast below is a claim of
 the paper verified from the shared material alone, and it closes the port's last functional gap
 against `main_fixed.cpp` — which had the equivalent fix on the C++ side via CPLEX's row duals.
 

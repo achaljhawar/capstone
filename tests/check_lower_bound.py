@@ -147,37 +147,57 @@ def main() -> int:
     sim = Simulator(inst, sol, 1, value_function="dp")
     costs = {}
     for policy, name in ((GREEDY, "Greedy"), (DP_INDEX, "MAI")):
-        total = 0.0
+        each = []
         for it in range(args.runs):
             sim.init_agents(it + 1)
-            total += sim.run(policy, it + 1).total_cost
-        costs[name] = total / args.runs
+            each.append(sim.run(policy, it + 1).total_cost)
+        arr = np.asarray(each, dtype=float)
+        # SE of the mean; with one run there is no spread to estimate, so it is unknown.
+        se = float(arr.std(ddof=1) / np.sqrt(arr.size)) if arr.size > 1 else float("nan")
+        costs[name] = (float(arr.mean()), se)
 
     print(f"  LP lower bound (LP optimum)    {bound:>12.6f}")
     print(f"  LP lower bound (p0 . V_0)      {bound_cxx:>12.6f}")
     print(f"  exact optimum (joint DP)       {exact:>12.6f}")
-    for name, c in costs.items():
-        print(f"  {name + ', simulated':<30} {c:>12.6f}   ({args.runs} runs)")
+    for name, (c, se) in costs.items():
+        tail = f"+- {se:.6f} SE" if se == se else "SE unknown, one run"
+        print(f"  {name + ', simulated':<30} {c:>12.6f}   ({args.runs} runs, {tail})")
 
     tol = 1e-9
     ok_bound = bound <= exact + tol
     print(f"\n  LP bound <= exact optimum      {'PASS' if ok_bound else 'FAIL'}"
           f"   (slack {exact - bound:+.6f}, {(exact - bound) / exact * 100:+.2f}%)")
 
+    # `exact <= expected cost of any policy` is a statement about the EXPECTATION.  A sample mean
+    # can sit below the optimum by chance -- at --runs 1 it routinely does -- so this half is a
+    # comparison against sampling error, not an assertion.  Treating it as one produced a false
+    # diagnosis ("the relaxation or the accounting is wrong") on a one-run invocation.
     ok_policies = True
-    for name, c in costs.items():
-        ok = exact <= c + tol
-        ok_policies &= ok
-        print(f"  exact optimum <= {name:<13} {'PASS' if ok else 'FAIL'}"
-              f"   (gap {c - exact:+.6f}, {(c - exact) / exact * 100:+.2f}%)")
+    for name, (c, se) in costs.items():
+        short = exact - c                      # positive means the sample beat the optimum
+        if short <= tol:
+            verdict, note = "PASS", f"gap {c - exact:+.6f}, {(c - exact) / exact * 100:+.2f}%"
+        elif se != se:
+            verdict, note = "n/a ", f"sample {short:.6f} below optimum; one run, no SE to judge it"
+        elif short <= 3 * se:
+            verdict, note = "PASS", f"sample {short:.6f} below optimum, within {short / se:.1f} SE"
+        else:
+            verdict, note = "FAIL", f"sample {short:.6f} below optimum, {short / se:.1f} SE -- too far"
+            ok_policies = False
+        print(f"  exact optimum <= {name:<13} {verdict}   ({note})")
 
-    if not (ok_bound and ok_policies):
-        print("\n  A FAIL here means the relaxation or the simulator's accounting is wrong, not that")
-        print("  a policy is bad: no policy can beat the exact optimum, and the relaxation cannot")
-        print("  exceed it.")
+    if not ok_bound:
+        print("\n  LP bound > exact optimum is deterministic and cannot be sampling noise: the")
+        print("  relaxation or the simulator's accounting is wrong.")
+        return 1
+    if not ok_policies:
+        print("\n  A sample mean below the exact optimum by more than three standard errors is not")
+        print("  luck. Suspect the cost accounting or the movement constraint, not the policy.")
         return 1
     print("\n  The ordering holds, so the LP relaxation and the simulator agree with a model solved")
-    print("  exactly and independently of both.")
+    print("  exactly and independently of both. Note the second comparison is statistical: it")
+    print("  checks the sample mean is not implausibly below the optimum, which needs enough runs")
+    print("  to mean anything -- use --runs 1 for timing, not for verification.")
     return 0
 
 

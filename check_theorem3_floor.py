@@ -9,8 +9,10 @@ and it is the complement to analyse_theorem3.py, which compares decay shapes.
 
 Per case and per tail window it reports the fitted floor C with a profile-likelihood 95%
 interval (dchi2 = 3.841), so "includes zero" and "excludes zero" become statable.  It then
-adds a model-free check that assumes neither curve: how much the gap actually moved between
-the two largest h, against what a C = 0 power law says it should have moved.
+then reports what the gap actually did between the two largest h, which assumes no curve at all,
+alongside what the full-range C = 0 power law predicted.  That second comparison is NOT model-free
+and is not a calibrated test: the predicted drop comes from a fit that may itself be rejected, and
+the discrepancy ignores uncertainty in the fitted exponent and any dependence across h.
 
 Usage:
     ~/patrol-venv/bin/python check_theorem3_floor.py --dir benchmarks/theorem3_h100
@@ -104,8 +106,13 @@ def main() -> int:
         sd = np.hypot(s1, s2)
         print("  h %d -> %d: gap %.4f%% -> %.4f%%, moved %.4f%% +- %.4f%% (%.1f sigma)"
               % (h[-2], h[-1], g1 * 100, g2 * 100, d * 100, sd * 100, d / sd))
-        print("            a C=0 power law (exponent %.3f) predicts %.4f%%, i.e. a drop of %.4f%% (%.1f sigma)"
-              % (p0, pred * 100, (g1 - pred) * 100, (g1 - pred) / sd))
+        # The discrepancy is observed-minus-predicted at the final h.  Dividing the PREDICTED
+        # drop by the SE instead -- which this line did until an adversarial review caught it --
+        # silently omits the observed drop and understated Case II at 5.8 sigma instead of 6.7.
+        print("            a C=0 power law (exponent %.3f) predicts %.4f%%, a drop of %.4f%%;"
+              % (p0, pred * 100, (g1 - pred) * 100))
+        print("            observed minus predicted at h=%d: %+.4f%% (%.1f sigma, uncalibrated)"
+              % (h[-1], (g2 - pred) * 100, (g2 - pred) / sd))
 
 
     return 0
