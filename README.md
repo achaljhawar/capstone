@@ -1,189 +1,189 @@
-# Coordinated multi-agent patrolling in Python
+# Coordinated multi-agent patrolling: a Python reimplementation
 
-A Python port of the C++ code for
+[![Paper](https://img.shields.io/badge/IEEE%20TAC-10.1109%2FTAC.2024.3517326-00629B)](https://doi.org/10.1109/TAC.2024.3517326)
+[![arXiv](https://img.shields.io/badge/arXiv-2309.13388-b31b1b)](https://arxiv.org/abs/2309.13388)
+![Python](https://img.shields.io/badge/python-3.10%E2%80%933.14-3776AB)
+![Dependencies](https://img.shields.io/badge/deps-NumPy%20%7C%20SciPy-informational)
+
+This repository reimplements, in Python, the C++ code that accompanies
 
 > J. Fu, Z. Wang and J. Chen, "Coordinated Multiagent Patrolling With State-Dependent Cost Rates:
-> Asymptotically Optimal Policies for Large-Scale Systems", *IEEE Transactions on Automatic Control*,
-> vol. 70, no. 6, pp. 3800-3815, June 2025.
+> Asymptotically Optimal Policies for Large-Scale Systems," *IEEE Transactions on Automatic Control*,
+> vol. 70, no. 6, pp. 3800–3815, June 2025. doi:[10.1109/TAC.2024.3517326](https://doi.org/10.1109/TAC.2024.3517326)
+> (preprint: [arXiv:2309.13388](https://arxiv.org/abs/2309.13388)).
 
-The original C++ (by Jing Fu, RMIT University) needs IBM CPLEX, Boost, GMP and MPFR. This port needs only
-NumPy and SciPy and uses the free HiGHS solver that ships with SciPy. Given the same inputs, it produces the
-same numbers as the C++, bit for bit (see [Verification](#verification)).
+The original C++ was written by Jing Fu (RMIT University) and shared by the authors as "code for sharing". It
+needs IBM CPLEX, Boost, GMP and MPFR. This reimplementation needs NumPy and SciPy, and solves the linear program
+with HiGHS, the open-source solver that ships with SciPy.
 
-If you use this code, please cite the paper above.
+The goal was a faithful reimplementation: the same model, the same random-number stream, the same tie-breaking
+and the same output files as the C++. When both programs read the same LP solution, the Python reproduces the
+C++'s result rows (8 of 10 columns exactly, the other two to the last bit) and its trajectory logs byte for byte.
+On top of that, the repository reruns the numerical experiments of the paper's Section VI and records how far
+they reproduce.
 
-## What it does
+This is an independent reimplementation. The paper's authors did not write or review it.
 
-A city is split into areas. Each area has a crime risk that rises when no patrol agent is there and falls when
-one is. There are two types of agents, and they can only move between neighbouring areas. The goal is to keep
-the total cost (the sum of all areas' risk over 10 time steps) low.
+## Contents
 
-The code builds the paper's synthetic test city (10 areas, 2 agent types, `patrol/generate.py`) and solves the
-relaxed problem as a linear program (LP) in `patrol/lp.py`. The LP gives a lower bound, a cost no policy can beat
-on average, and the values the MAI policy uses.
+- [Status](#status)
+- [Background](#background)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Output format](#output-format)
+- [Results](#results)
+- [The value function, and why MAI depends on the LP solver](#the-value-function-and-why-mai-depends-on-the-lp-solver)
+- [Verification against the C++](#verification-against-the-c)
+- [Where the shared code differs from the paper](#where-the-shared-code-differs-from-the-paper)
+- [Known limitations](#known-limitations)
+- [Command-line reference](#command-line-reference)
+- [Repository layout](#repository-layout)
+- [Documentation](#documentation)
+- [Citation](#citation)
+- [Acknowledgements and licence](#acknowledgements-and-licence)
 
-`patrol/sim.py` then simulates two policies 1,000 times each. Greedy sends agents to the riskiest neighbouring
-areas first. MAI is the paper's index policy, built from the LP solution. The output is each policy's average
-cost and its gap to the lower bound. The paper claims MAI's gap shrinks as the system is scaled up (the `scaler`
-argument).
+## Status
 
-## Requirements
+| Item | Status | Evidence |
+|---|---|---|
+| Same output as the C++ on the same LP solution | Reproduced. Scalers 1, 2 and 5 are in the test suite; seven scalers from 1 to 100 are in [benchmarks.md](benchmarks.md) §2 | `tests/test_against_cpp.py` (10 tests) |
+| Same output as the authors' own CPLEX build | Reproduced on two CPLEX 22.2 solutions (ARM64 and x86-64) | `tests/data/cpp_reference_cplex*.tsv` |
+| Lower bound from the relaxed LP | Matches CPLEX (371.653 + 3036.31 for the two agent types) | `validate_lp.py`, test suite |
+| Paper Table II (initial agent placement) | Matches for all three cases with seeds 300, 395 and 51 | `tests/find_paper_seeds.py` |
+| Paper Table I (initial risk) | Matches, except one printed entry for Case III (see [departures](docs/departures.md#table-i-case-iii)) | `patrol/generate.py` |
+| Figure 3, Case I: MAI under 3% in more than 75% of settings at h = 40 | Reproduced: 92.8% of 1,000 settings | `benchmarks/fig3_case1_full.csv` |
+| Figure 3, Cases II and III | Not run | |
+| Figure 4: MAI under 3% for h ≥ 30, Greedy flat | Observed at every plotted h from 30 to 50 in all three cases; the input rows are not archived | `benchmarks/fig4.png` |
+| Theorem 3 (exponential convergence) | Not testable from finite runs as stated; finite-h measurements are in [benchmarks.md](benchmarks.md) §8 | `analyse_theorem3.py` and related scripts |
+| The authors' own published curve values | Cannot be compared: the shared package has no LP solution, run log or figure data | |
 
-Python 3 with NumPy and SciPy (tested with Python 3.14, NumPy 2.4.6, SciPy 1.17.1).
+[docs/reproduction.md](docs/reproduction.md) gives the detail behind every row.
+
+## Background
+
+A city is divided into I areas connected by a graph. Each area is split into h identical sub-areas, where h is
+the paper's scaling parameter (`scaler` in the code). Every sub-area carries a crime risk for each of J = 2 crime
+types, held as a Beta-distribution belief (α, β) with α + β = 50, so the crime probability is α / 50. The risk
+rises while no agent of that type is present and changes when one is. Agents of type j can move only to
+neighbouring areas. The aim is to minimise the total expected risk over T = 10 time steps.
+
+The joint problem is far too large to solve directly. The paper relaxes the movement constraints with Lagrange
+multipliers μ, which splits it into one small problem per (area, agent type). The relaxed problem is a linear
+program, and its optimum is a lower bound on the cost of any policy. Its solution also gives a value function V
+and the multipliers μ, from which the paper builds the MAI index policy: at every step, rank all candidate agent
+movements by their index and carry them out in order. The paper proves MAI is asymptotically optimal as h grows
+and compares it against a greedy baseline that moves agents to the riskiest neighbouring sub-areas first.
+
+The code here does the same four things the C++ does:
+
+1. Build the synthetic test city (`patrol/generate.py`), consuming glibc `rand()` exactly as `main.cpp` does.
+2. Build and solve the relaxed LP for each agent type (`patrol/lp.py`), giving the lower bound, V and μ.
+3. Simulate Greedy and MAI with common random numbers, 1,000 runs each by default (`patrol/sim.py`).
+4. Report each policy's mean cost, its 95% confidence half-width, and its gap to the lower bound,
+   (cost − bound) / bound.
+
+[docs/model.md](docs/model.md) states the model precisely and maps each piece to the paper and to the C++.
+
+## Installation
+
+Python 3.10 or newer with NumPy and SciPy. matplotlib is needed only for the plotting scripts.
+
+```bash
+git clone https://github.com/achaljhawar/capstone.git
+cd capstone
+python3 -m venv .venv && source .venv/bin/activate
+pip install numpy scipy matplotlib
+```
+
+The results in this repository were produced with Python 3.14.5, NumPy 2.4.6 and SciPy 1.17.1, and
+cross-checked with Python 3.10 and 3.12 on NumPy 2.2.6 and SciPy 1.15.3. The HiGHS version bundled with SciPy
+decides which optimal LP solution comes back, so pin SciPy if you need a run to repeat exactly (see
+[below](#the-value-function-and-why-mai-depends-on-the-lp-solver)).
+
+There is nothing to compile and no package to install. Run the scripts from the repository root.
 
 ## Quick start
 
 ```bash
-# 1. Solve the LP and write the solution file (~90 s)
+# Solve the relaxed LP for the default instance (Case II: 10 areas, seed 395) and write the
+# solution file in the C++'s format, test23/store/store_valueFuncs-seed395.out
 python3 gen.py
-#    -> test23/store/store_valueFuncs-seed395.out
 
-# 2. Simulate Greedy and MAI at scalers 1, 2 and 5 (1,000 runs each)
+# Simulate Greedy and MAI at h = 1, 2 and 5. Appends one row per h to
+# test33/long-term-performance-cost.py.out
 python3 simulate.py 1 2 5
-#    -> appends one row per scaler to test33/long-term-performance-cost.py.out
+
+# Check the reimplementation against the C++ reference data
+python3 tests/test_against_cpp.py
 ```
 
-`simulate.py` solves the LP itself, so step 1 is only needed if you want the solution file (for example, to feed
-it to the C++ program).
+`simulate.py` solves the LP itself, so you need `gen.py` only when you want the solution file, for example to
+feed it to the C++ program.
 
-## Output
+To reproduce the C++/CPLEX run behind `output.txt`, simulate on the solution file that run wrote:
 
-Each row of `long-term-performance-cost*.out` is tab-separated, in the same format as the C++:
+```bash
+python3 simulate.py 1 2 5 --store tests/data/store_cplex22-x86-seed395.out.gz --no-write
+```
 
-| # | Column |
-|---|---|
-| 1 | scaler |
-| 2-4 | Greedy: average total cost, 95% confidence half-width, average number of adapted movements |
-| 5-7 | MAI: the same three |
-| 8 | Greedy's gap to the lower bound, (cost − bound) / bound |
-| 9 | MAI's gap to the lower bound |
-| 10 | Lower bound |
-| 11 | "Slackness", a diagnostic only (see below) |
+To get MAI numbers that do not depend on which LP solver you used:
 
-With the default settings you should get:
+```bash
+python3 simulate.py 20 --value-function dp
+```
 
-| scaler | Greedy | MAI | Lower bound |
-|---|---|---|---|
+The paper's three cases, the per-figure scripts and their options are in
+[docs/reproduction.md](docs/reproduction.md).
+
+## Output format
+
+`simulate.py` prints, and appends to its output file, one tab-separated row per scaler in the same layout as the
+C++'s `long-term-performance-cost.out`:
+
+| Column | Meaning |
+|---:|---|
+| 1 | scaler h |
+| 2 | Greedy: mean total cost over the runs |
+| 3 | Greedy: 95% confidence half-width of that mean |
+| 4 | Greedy: mean number of movement adaptions per run (moves re-routed to keep the plan feasible) |
+| 5–7 | MAI: the same three |
+| 8 | Greedy gap to the lower bound, (cost − bound) / bound |
+| 9 | MAI gap to the lower bound |
+| 10 | Lower bound (the relaxed LP's optimum) |
+| 11 | "Slackness", a diagnostic carried over from the C++ (see [docs/verification.md](docs/verification.md#slackness)) |
+
+With the default settings, the first three scalers give:
+
+| h | Greedy | MAI | Lower bound |
+|---:|---:|---:|---:|
 | 1 | 3910.04 | 3694.55 | 3407.97 |
 | 2 | 3852.71 | 3599.99 | 3407.97 |
 | 5 | 3806.05 | 3537.33 | 3407.97 |
 
-## Why MAI results depend on the LP solver
+These use HiGHS's LP solution. A CPLEX solution gives the same Greedy column and the same bound, and a different
+MAI column, for the reason explained two sections down.
 
-The MAI policy uses a value function V from the LP, exactly as the C++ does. The LP only pins V down for
-situations it expects to happen. For the rest, the solver returns arbitrary numbers, often its ±100,000 variable
-bound, and those entries depend on the solver. So HiGHS and CPLEX give different MAI results even though they
-agree on the lower bound and the multipliers. At scaler 20, MAI's gap to the lower bound is 2.7% on a HiGHS
-solution and 7.1% to 7.4% on two CPLEX 22.2 solutions (see [benchmarks.md](benchmarks.md)). Say which solver
-produced the LP solution when you report results.
+## Results
 
-To reproduce the original C++/CPLEX numbers exactly, run on the solution file the C++ wrote. The one behind
-`output.txt` is in `tests/data/`:
+Each chart below says which value function MAI used: `lp` is the LP solution's own V, as the C++ uses it, and
+`dp` is V rebuilt from μ by the Bellman recursion. The distinction matters; see the
+[next section](#the-value-function-and-why-mai-depends-on-the-lp-solver).
 
-```bash
-python3 simulate.py 1 2 5 --store tests/data/store_cplex22-x86-seed395.out.gz
-```
+### Gap to the lower bound as h grows (Case II)
 
-### Getting a number that does not move with the solver
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/gap-dark.svg">
+  <img src="benchmarks/gap-light.svg" alt="Line chart of the gap to the lower bound against the scaler, 1 to 100 on a log scale. Greedy falls from 14.7% to 9.9%; MAI falls from 8.4% to 2.2%." width="760">
+</picture>
 
-`--value-function dp` uses the Bellman recursion on the same multipliers instead of the LP vertex's V. That is
-the paper's own definition (Section III-A, eq. 15); it is defined at every state, it is itself an optimal
-solution of the same LP, and because the multipliers agree across solvers to 2e-11 it gives the same answer
-whichever solver produced them.
+Seed 395, 1,000 runs per policy per point, `lp` V from the HiGHS solution in `tests/data/store_lp-seed395.out.gz`.
+Bands are 95% confidence intervals. MAI's gap falls from 8.4% at h = 1 to 2.2% at h = 100; Greedy's levels off
+near 10%. The C++ gives the same values at every point. Data: `benchmarks/results.tsv`; chart:
+`benchmarks/plot.py`.
 
-```bash
-python3 simulate.py 20 --value-function dp    # solver-independent
-python3 simulate.py 20 --value-function lp    # default: faithful to the C++ store file
-```
+### Figure 4: deviation against h for the paper's three cases
 
-The paper's Figure 4 claims MAI's deviation is under 3% for all h >= 30. On Case II that claim separates the
-two: the Bellman V gives 0.9-1.3% and passes, the CPLEX vertex V gives 5.3-6.6% and fails. See
-[REPRODUCTION.md](REPRODUCTION.md) and [VALUE_FUNCTION.md](VALUE_FUNCTION.md).
-
-## Command-line options
-
-`gen.py` and `simulate.py` share these instance options:
-
-| Option | Default | Meaning |
-|---|---|---|
-| `--seed` | 395 | Random seed for building the city and for the simulations |
-| `--alpha`, `--beta` | `process/test2_alpha.in`, `process/test2_beta.in` | Initial risk data per area |
-| `--graph` | `graph/adjacent_matrix_10.in` | Which areas are neighbours |
-| `--areas` | 10 | Number of areas |
-| `--no-row-lower-bound` | off | Skip one LP constraint the C++ includes: ~4x faster with the same lower bound, but slightly different V off the LP's support |
-
-`simulate.py` also takes:
-
-| Option | Meaning |
-|---|---|
-| `--iters N` | Runs per policy (default 1000) |
-| `--store FILE` | Use an existing solution file instead of solving the LP |
-| `--trajectory DIR` | Write step-by-step logs of every run (costs, agent positions, moves) |
-| `--no-write` | Print rows only; don't append to the output file |
-| `--value-function {lp,dp}` | Which V the MAI index reads: `lp` (default) the LP vertex's, as the C++ store file holds it; `dp` the Bellman recursion on the same multipliers |
-
-`gen.py --policy` also writes the LP's randomized policy (`store_lpPolicy-seed<seed>.out`). This is a Python-only
-extra that the C++ never reads.
-
-The simulator is pure Python: scaler 5 takes about 15 s, and large scalers take minutes.
-
-## Verification
-
-```bash
-python3 tests/test_against_cpp.py      # or: python3 -m pytest tests/
-```
-
-The tests check that:
-
-- the generated city matches the C++ run's own output (`output.txt`, `test33/store/initProbs-*`);
-- the LP's optimum matches the CPLEX objective values;
-- for scalers 1, 2 and 5, every output column matches the C++ program exactly, at full double precision;
-- the step-by-step trajectory logs match the C++ program byte for byte;
-- on two LP solutions written by real CPLEX 22.2 (one on ARM, one on x86-64), the authors' own Linux build and
-  the port agree bit for bit, except the last bit of the two confidence intervals (the C++ takes its t-quantile
-  from Boost, the port from SciPy);
-- on the x86 solution, the port prints the gradient and slackness lines of `output.txt` exactly.
-
-The C++ reference results are in `tests/data/`. To regenerate them, build the shared C++ without CPLEX or Boost
-(this needs GNU g++, GMP and MPFR; on macOS, Homebrew's `g++-15`):
-
-```bash
-CXX=g++-15 CC=gcc-15 python3 tests/cpp_harness/make_reference.py "path/to/code for sharing"
-```
-
-`tests/cpp_harness/build.py` lists every change it makes to the C++ sources. None of them affect what the
-simulation computes.
-
-[benchmarks.md](benchmarks.md) has results for scalers 1 to 100 and the Python-vs-C++ check
-at each point.
-
-## Documentation
-
-| Document | What it covers |
-|---|---|
-| [REPRODUCTION.md](REPRODUCTION.md) | What the paper's Section VI specifies, which parts are reproducible from the shared package, the per-case seeds, and how to run each figure |
-| [VALUE_FUNCTION.md](VALUE_FUNCTION.md) | Where the value function comes from, why the LP leaves most of it undetermined, and what that does to MAI |
-| [DECISIONS.md](DECISIONS.md) | A chronological log of how this was built: what was hit, what was chosen, and what each choice cost |
-| [DESIGN.md](DESIGN.md) | Every porting decision in detail, with the C++ behaviours reproduced on purpose |
-| [benchmarks.md](benchmarks.md) | Results for scalers 1 to 100, the Python-vs-C++ check, and the CPLEX solver-dependence study |
-
-## Reproducing the paper's three cases
-
-The paper runs I = 6, 10 and 14 areas ("Cases I, II, III"). The initial probabilities come from `rand()`, and
-the stream position depends on the area count, so each case needs its own seed. Searching for a placement that
-matches the paper's Table II (`tests/find_paper_seeds.py`) gives:
-
-| Case | Areas | Seed | Graph |
-|---|---:|---:|---|
-| I | 6 | 300 | `graph/adjacent_matrix_6.in` |
-| II | 10 | 395 | `graph/adjacent_matrix_10.in` |
-| III | 14 | 51 | `graph/adjacent_matrix_14.in` |
-
-All three match the paper's Table I (initial risk) and Table II (initial probabilities) exactly.
-
-Running the paper's Figure 4 h-grid on all three reproduces its claims: MAI's deviation is under 3%
-at every h >= 30, GRD stays flat and does not converge, and the 95% confidence intervals are within
-+-3% of the mean (worst observed 0.91%).
+<img src="benchmarks/fig4.png" alt="Performance deviation of MAI and GRD against h for Cases I, II and III. GRD stays between 10% and 12.5% after h = 10; MAI is under 3% at every plotted h from 30 to 50." width="760">
 
 | h | Case I GRD / MAI | Case II GRD / MAI | Case III GRD / MAI |
 |---:|---:|---:|---:|
@@ -192,35 +192,226 @@ at every h >= 30, GRD stays flat and does not converge, and the 95% confidence i
 | 30 | 9.76% / 1.42% | 10.19% / 1.83% | 12.24% / 0.98% |
 | 50 | 9.88% / 1.28% | 10.09% / 2.29% | 12.27% / 1.15% |
 
-Lower bounds 2613.70, 3407.97, 5333.08. Plot: `benchmarks/fig4.png` via `reproduce_fig4.py`.
-Figure 3 (a CDF over 1,000 random settings per case) is scripted in `reproduce_fig3.py` but not yet
-run; it is about a day on 8 cores. Full detail, including what cannot be reproduced from the shared
-package, is in [REPRODUCTION.md](REPRODUCTION.md).
+1,000 runs per policy per point. Lower bounds 2613.70, 3407.97 and 5333.08. The paper's claims hold on this grid:
+MAI is under 3% at every plotted h ≥ 30 and Greedy does not converge. The rows were produced by per-case builds
+of modified C++ sources (`*_fixed`) on HiGHS LP solutions from `gen.py` (`lp` V). Neither those rows nor the
+modified sources and their build script are in the repository, so `reproduce_fig4.py` cannot redraw this figure from a
+clone. See [docs/reproduction.md](docs/reproduction.md#figure-4).
+
+### Figure 3: distribution over random settings (Case I)
+
+<img src="benchmarks/fig3.png" alt="Cumulative distribution of MAI's deviation over 1,000 random settings of Case I for h = 1, 5, 10, 20 and 40, with Greedy at h = 40. At h = 40, 92.8% of settings are under 3%." width="680">
+
+| h | MAI median | Share of settings with MAI under 3% | Greedy median |
+|---:|---:|---:|---:|
+| 1 | 4.35% | 21.0% | 7.81% |
+| 5 | 1.49% | 87.0% | 6.85% |
+| 10 | 0.93% | 91.5% | 6.64% |
+| 20 | 0.60% | 92.7% | 6.53% |
+| 40 | 0.41% | 92.8% | 6.45% |
+
+Case I, seeds 1 to 1,000 (the paper's sample size), one LP solve per setting, 1,000 runs per policy, `dp` V. The
+paper says MAI is under 3% in over 75% of settings at h = 40; the measured share is 92.8%. The plot shows Greedy
+at h = 40 only, where the paper shows all five h. Cases II and III have not been run at 1,000 settings. Data:
+`benchmarks/fig3_case1_full.csv`; chart: `plot_fig3.py`.
+
+### Convergence in h, up to h = 100
+
+<img src="benchmarks/theorem3_h100.png" alt="Log-log plots of MAI's gap from the relaxed optimum against h from 1 to 100 for the three cases, with fitted exponential and power-law curves. The power law fits Case I closely; Case II flattens near 1%; Case III is non-monotone." width="900">
+
+One instance per case (seeds 300, 395, 51), 13 values of h from 1 to 100, 10,000 runs per point, `dp` V. Over
+this range a power law fits much better than an exponential in all three cases. The inequality in Theorem 3 is
+satisfied by any gap that tends to zero, so these fits do not test the theorem's rate. Repeating the experiment
+on other seeds, and over 200 random settings per case, shows that the shape of the tail differs from instance to
+instance. [benchmarks.md](benchmarks.md) §8 has the full analysis, its statistical caveats, and the corrections
+made during review.
+
+## The value function, and why MAI depends on the LP solver
+
+MAI's index reads the value function V. The C++ takes V straight from the LP solution. The LP determines V only
+at states its optimal solution actually visits. Everywhere else V is whatever the solver's optimal vertex
+happens to hold, often the ±100,000 variable bound. Two solvers, or one solver on two machines, can return
+different optimal vertices with the same optimum and the same μ (they agree to 2e-11 here) and very different
+off-support V.
+
+That moves MAI's results by whole percentage points. On the seed-395 instance:
+
+| h | MAI gap, HiGHS | MAI gap, CPLEX 22.2 (x86-64) | MAI gap, CPLEX 22.2 (ARM64) |
+|---:|---:|---:|---:|
+| 1 | 8.41% | 10.93% | 11.20% |
+| 20 | 2.66% | 7.05% | 7.36% |
+| 100 | 2.17% | 5.47% | 6.86% |
+
+Greedy and the lower bound are the same in all three columns. The full table is in
+[benchmarks.md](benchmarks.md) §3.
+
+`--value-function` chooses which V the index reads:
+
+- `lp` (the default) reads the LP vertex's V, as the C++ does. Use it to reproduce a particular C++ run, and
+  report which solver produced the solution.
+- `dp` rebuilds V from μ with the Bellman recursion, the paper's definition in Section III-A (eq. 15). It is
+  defined at every state, agrees with the LP's V wherever the LP fixes it, and gives the same answer whichever
+  solver produced μ. The Figure 3 and convergence experiments use it.
+
+[docs/value-function.md](docs/value-function.md) explains the mechanism and what each option is good for.
+
+## Verification against the C++
+
+```bash
+python3 tests/test_against_cpp.py      # or: python3 -m pytest tests/test_against_cpp.py
+```
+
+The suite has 10 tests. They check that:
+
+- the glibc `rand()` reimplementation produces glibc's stream, and the libstdc++ heap reimplementation sorts;
+- the generated instance matches the C++ run's own log (`output.txt`, `test33/store/initProbs-*`);
+- the LP optimum and multipliers match the reference values;
+- at scalers 1, 2 and 5, every column of the result row matches the C++ on three different LP solutions
+  (HiGHS, CPLEX ARM64, CPLEX x86-64): eight columns exactly, and the two confidence half-widths to within 1e-15,
+  because the C++ takes its t-quantile from Boost and this code from SciPy;
+- the gradient and slackness lines of `output.txt` are reproduced exactly;
+- the step-by-step trajectory files match the C++'s byte for byte.
+
+The reference data in `tests/data/` came from the authors' unmodified source. `tests/cpp_harness/` rebuilds that
+source without CPLEX or Boost (it reads an existing LP solution file instead of solving) and regenerates the
+references:
+
+```bash
+CXX=g++-15 CC=gcc-15 python3 tests/cpp_harness/make_reference.py "path/to/code for sharing"
+```
+
+`tests/cpp_harness/build.py` lists every change it makes to the C++ sources. None of them changes what the
+simulation computes.
+
+Some checks go beyond agreement with the C++, because a shared mistake would pass every comparison: the lower
+bound against an exact joint dynamic program on tiny instances, and the decomposition of Proposition 1 at fixed
+μ. [docs/verification.md](docs/verification.md) describes each check and what it does and does not establish.
+
+## Where the shared code differs from the paper
+
+The reimplementation follows the C++ wherever the C++ and the paper disagree, so the results above are results
+about the shared code's model. The differences are:
+
+| | Paper | Shared C++ (and this code) |
+|---|---|---|
+| Patrolled sub-area, no crime reported | α becomes N(α + Δ¹α, β) | α becomes N(max(0, α − Δ¹α), β), so it falls instead of rising |
+| Risk at α = 0 | probability and cost 0 | probability 0.01, cost 1 |
+| Normalisation N(α, β) = ⌊50α/(α + β)⌋ | exact | floating-point division then truncation: `normalize(29, 21)` gives 28, not 29 |
+| Cost perturbation ε(i, j, s, a, t) for strict indexability (Section V) | present | absent: the cost ignores the action and the time, so most of the MAI ranking is ties |
+| Movement comparator | not specified | not a strict weak ordering, so `std::make_heap` is formally undefined; the order it produces in practice is reproduced |
+| Confidence interval | Student t | variance divided by n with a t-quantile at n − 1 degrees of freedom |
+| Table I, Case III, area 13, type 2 | (22, 46), which does not sum to 50 | (4, 46) |
+
+[docs/departures.md](docs/departures.md) gives the code location, the measured effect and the evidence for each.
+
+## Known limitations
+
+These are limitations of this repository, as distinct from the differences above:
+
+- Seeds of 2³¹ and above do not reproduce glibc's stream: `GlibcRand` treats the seed as unsigned where glibc
+  uses signed 32-bit arithmetic. Every seed used here is far below that.
+- A solution file loaded with `--store` is checked for dimensions only. A file written for a different instance
+  of the same size loads without an error.
+- The Figure 4 input rows, the `*_fixed` C++ sources and their build script are not archived.
+- `validate_lp.py` accepts instance options but compares against the hard-coded seed-395 reference values.
+- The simulator is pure Python and single-threaded. Large h and many settings take a long time.
+
+## Command-line reference
+
+`gen.py` and `simulate.py` share these instance options:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--seed` | 395 | Seed for building the instance and for the simulation runs |
+| `--alpha`, `--beta` | `process/test2_alpha.in`, `process/test2_beta.in` | Initial risk data per area (paper Table I) |
+| `--graph` | `graph/adjacent_matrix_10.in` | Adjacency matrix of the areas |
+| `--areas` | 10 | Number of areas I |
+| `--from-cpp-log LOG` | | Rebuild the instance from a C++ run's stdout instead of generating it (needs `--init-probs`) |
+| `--no-row-lower-bound` | off | Drop the C++'s −1e5 lower bound on every LP row. Same optimum and μ, different vertex, so different off-support V |
+
+`gen.py` also takes `--out-dir` (default `test23/store`), `--value-function {lp,dp}` (which V to write into the
+solution file) and `--policy`, which writes the LP's randomized policy to `store_lpPolicy-seed<seed>.out`. The C++
+never reads that file.
+
+`simulate.py` takes one or more scalers and:
+
+| Option | Meaning |
+|---|---|
+| `--iters N` | Runs per policy (default 1000) |
+| `--store FILE` | Use an existing solution file (plain or `.gz`) instead of solving the LP |
+| `--value-function {lp,dp}` | Which V the MAI index reads (default `lp`) |
+| `--trajectory DIR` | Write the per-step cost, position and movement logs the C++ writes |
+| `--out FILE` | Where to append the rows (default `test33/long-term-performance-cost.py.out`) |
+| `--no-write` | Print the rows only |
+
+The experiment scripts (`reproduce_fig3.py`, `reproduce_fig4.py`, `plot_fig3.py`, `analyse_theorem3.py`,
+`check_theorem3_*.py`) are described in [docs/reproduction.md](docs/reproduction.md).
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
 | `gen.py`, `simulate.py`, `validate_lp.py` | Command-line entry points |
-| `patrol/model.py` | One area's risk process: states, costs, transitions |
-| `patrol/generate.py` | Builds the test city the way `main.cpp` does |
-| `patrol/instance.py` | The problem instance (can also be rebuilt from a C++ run log) |
-| `patrol/lp.py` | The relaxed LP, the lower bound, and the C++'s dynamic program for given multipliers |
-| `patrol/sim.py` | The Greedy and MAI simulations |
-| `patrol/gradients.py` | The slackness diagnostic |
-| `patrol/cxx_compat.py` | Exact copies of glibc's `rand()` and the C++ heap sort, so random draws and tie-breaks match |
-| `patrol/storefile.py` | Reads and writes the C++ solution-file format |
-| `process/`, `graph/` | Input data |
-| `output.txt`, `test33/store/initProbs-*` | Output of a C++/CPLEX run (x86-64, CPLEX 22.2), used by the tests |
-| `tests/` | Tests, C++ reference data, and the C++ build harness |
+| `patrol/model.py` | One sub-area's process: knowledge states, cost, transitions |
+| `patrol/generate.py` | Builds the instance the way `main.cpp` does |
+| `patrol/instance.py` | The problem instance; can also be rebuilt from a C++ run log |
+| `patrol/lp.py` | The relaxed LP, the lower bound, and the Bellman recursion for given μ |
+| `patrol/sim.py` | Greedy and MAI simulation, movement adaption, confidence intervals |
+| `patrol/gradients.py` | The C++'s slackness diagnostic, plus the same quantity under the LP's randomized policy |
+| `patrol/cxx_compat.py` | Bit-exact glibc `rand()` and libstdc++ `make_heap`/`pop_heap` |
+| `patrol/storefile.py` | Reads and writes the C++'s LP solution file format |
+| `patrol/cli.py` | Options shared by the entry points |
+| `graph/`, `process/` | Input data from the authors' package: area graphs and initial risk |
+| `output.txt`, `test33/store/initProbs-*` | Log of a C++/CPLEX 22.2 run on x86-64, used by the tests |
+| `tests/` | The C++ comparison suite, the C++ build harness, reference data, and the model checks |
+| `reproduce_fig3.py`, `reproduce_fig4.py`, `plot_fig3.py` | Paper figure experiments |
+| `analyse_theorem3.py`, `check_theorem3_*.py` | Convergence analysis |
+| `benchmarks/`, `benchmarks.md` | Result data, charts, and the full experimental record |
+| `docs/` | Documentation |
 
-## Differences from the C++
+## Documentation
 
-The LP is solved with HiGHS instead of CPLEX. The lower bound and multipliers agree, but the arbitrary
-off-support values differ (see above).
+| Document | Contents |
+|---|---|
+| [docs/model.md](docs/model.md) | The model, the relaxation and the two policies, with the paper, C++ and Python locations side by side |
+| [docs/reimplementation.md](docs/reimplementation.md) | How the C++ was reimplemented bit for bit, and every place the Python deliberately differs |
+| [docs/value-function.md](docs/value-function.md) | Where V comes from, why the LP leaves most of it undetermined, and the `lp`/`dp` options |
+| [docs/verification.md](docs/verification.md) | Each test and check, and the scope of what it establishes |
+| [docs/reproduction.md](docs/reproduction.md) | The paper's Section VI, the per-case settings, and how to run each experiment |
+| [docs/departures.md](docs/departures.md) | Differences between the paper and the shared code, and the repository's known limitations |
+| [benchmarks.md](benchmarks.md) | The full experimental record, including the convergence analysis and the review corrections |
 
-Slackness (column 11) is computed exactly as in the C++, but it depends on how exact ties are broken: a change in
-the 12th decimal of the multipliers can swing it from about −58 to +146. Treat it as a diagnostic. The C++
-documentation also describes it as a test value.
+## Citation
 
-The C++ hard-codes 1,000 runs in its confidence intervals. The Python uses the actual `--iters` count.
+If you use this code, cite the original paper. If your work depends on this reimplementation specifically (its
+results, its verification, or the code itself), cite it as well. GitHub's "Cite this repository" button reads
+[`CITATION.cff`](CITATION.cff).
+
+```bibtex
+@article{fu2025patrolling,
+  author  = {Fu, Jing and Wang, Zengfu and Chen, Jie},
+  title   = {Coordinated Multiagent Patrolling With State-Dependent Cost Rates: Asymptotically Optimal
+             Policies for Large-Scale Systems},
+  journal = {IEEE Transactions on Automatic Control},
+  volume  = {70},
+  number  = {6},
+  pages   = {3800--3815},
+  year    = {2025},
+  doi     = {10.1109/TAC.2024.3517326}
+}
+
+@software{jhawar2026patrolling,
+  author = {Jhawar, Achal},
+  title  = {Coordinated Multi-Agent Patrolling with State-Dependent Cost Rates: A {Python} Reimplementation},
+  year   = {2026},
+  url    = {https://github.com/achaljhawar/capstone}
+}
+```
+
+## Acknowledgements and licence
+
+The model, the LP formulation, the MAI policy and the input data in `graph/` and `process/` are the work of Jing
+Fu, Zengfu Wang and Jie Chen. The C++ this code reimplements is copyright © 2024 Jing Fu, School of Engineering,
+RMIT University. Its authors ask that work using the program or its data cite the paper above.
+
+This repository does not yet include a licence file for the Python code.

@@ -1,0 +1,67 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite it as below, and also cite the original paper by
+  Fu, Wang and Chen listed under references.
+type: software
+title: >-
+  Coordinated Multi-Agent Patrolling with State-Dependent Cost Rates:
+  A Python Reimplementation
+authors:
+  - family-names: Jhawar
+    given-names: Achal
+repository-code: "https://github.com/achaljhawar/capstone"
+abstract: >-
+  A Python reimplementation of the C++ code released with Fu, Wang and Chen,
+  "Coordinated Multiagent Patrolling With State-Dependent Cost Rates: Asymptotically
+  Optimal Policies for Large-Scale Systems" (IEEE Transactions on Automatic Control,
+  2025). It builds the paper's synthetic patrol instances, solves the relaxed problem
+  as a linear program with HiGHS, and simulates the MAI index policy and a greedy
+  baseline. On the same LP solution it reproduces the original program's result rows
+  and trajectory logs at full double precision. The repository also reruns the
+  paper's Section VI experiments and documents where the shared code and the paper
+  differ.
+keywords:
+  - multi-agent patrolling
+  - restless multi-armed bandits
+  - index policy
+  - Lagrangian relaxation
+  - linear programming
+  - asymptotic optimality
+  - reproducibility
+  - reimplementation
+references:
+  - type: article
+    title: >-
+      Coordinated Multiagent Patrolling With State-Dependent Cost Rates:
+      Asymptotically Optimal Policies for Large-Scale Systems
+    authors:
+      - family-names: Fu
+        given-names: Jing
+      - family-names: Wang
+        given-names: Zengfu
+      - family-names: Chen
+        given-names: Jie
+    journal: IEEE Transactions on Automatic Control
+    volume: 70
+    issue: 6
+    start: 3800
+    end: 3815
+    year: 2025
+    month: 6
+    doi: 10.1109/TAC.2024.3517326
+    identifiers:
+      - type: doi
+        value: 10.1109/TAC.2024.3517326
+      - type: url
+        value: "https://arxiv.org/abs/2309.13388"
+        description: arXiv preprint
+  - type: software
+    title: Code for sharing (C++ implementation of the MAI patrolling policy)
+    authors:
+      - family-names: Fu
+        given-names: Jing
+        affiliation: School of Engineering, RMIT University
+    year: 2024
+    notes: >-
+      The original C++ implementation accompanying the paper, distributed by the
+      authors. This repository reimplements it.

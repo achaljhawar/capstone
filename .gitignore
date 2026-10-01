@@ -30,12 +30,12 @@ dist/
 .DS_Store
 Thumbs.db
 
-# Working documents: kept on disk, not in the repo.
-# Only README.md and benchmarks.md are tracked as docs.
-DESIGN.md
-DECISIONS.md
-REPRODUCTION.md
-VALUE_FUNCTION.md
+# Old working documents at the root: kept on disk, not in the repo. Anchored with a leading
+# slash so they do not also match docs/reproduction.md (git ignores case on macOS).
+/DESIGN.md
+/DECISIONS.md
+/REPRODUCTION.md
+/VALUE_FUNCTION.md
 
 # Theorem 3 sweep rows: small, and they are the data behind benchmarks.md section 8.
 !benchmarks/theorem3_h100/*.out
