@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from patrol.cli import ROW_BOUND_HELP, add_instance_args, instance_from_args
+from patrol.cli import ROW_BOUND_HELP, add_instance_args, add_value_function_arg, instance_from_args
 from patrol.gradients import slackness
 from patrol.lp import RelaxedSolution, solve_relaxed
 from patrol.sim import ITER_MAX, monte_carlo
@@ -30,6 +30,7 @@ def main() -> int:
     add_instance_args(ap)
     ap.add_argument("--iters", type=int, default=ITER_MAX)
     ap.add_argument("--no-row-lower-bound", action="store_true", help=ROW_BOUND_HELP)
+    add_value_function_arg(ap)
     ap.add_argument("--store", help="use this store_valueFuncs file instead of solving the LP")
     ap.add_argument("--trajectory", metavar="DIR",
                     help="write the per-step trajectory files (simulation()'s outFlag output) into DIR")
@@ -45,14 +46,14 @@ def main() -> int:
     else:
         sol = solve_relaxed(inst, ranged_rows=not args.no_row_lower_bound)
         source = "LP"
-    lb = sol.lower_bound_cxx()
+    lb = sol.lower_bound_cxx(args.value_function)
     slack = slackness(sol)
     print(f"lower bound = {lb:.6f}, slackness = {slack:.6g}   [{source}, {time.time() - t0:.1f} s]", file=sys.stderr)
 
     for scaler in args.scalers:
         t0 = time.time()
         row = monte_carlo(inst, sol, scaler, seed=args.seed, iter_max=args.iters, progress=True,
-                          slackness=slack, trajectory_dir=args.trajectory)
+                          slackness=slack, trajectory_dir=args.trajectory, value_function=args.value_function)
         line = row.as_line()
         print(f"scaler={scaler}: greedy {row.greedy_avg:.2f} +-{row.greedy_ci:.2f}  MAI {row.mai_avg:.2f} +-{row.mai_ci:.2f}"
               f"  dev {row.greedy_dev:.4f} / {row.mai_dev:.4f}   [{time.time() - t0:.1f} s]", file=sys.stderr)

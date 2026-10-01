@@ -5,9 +5,19 @@ import argparse
 
 from . import generate
 from .instance import Instance, load_from_cpp_outputs
+from .lp import VALUE_FUNCTIONS
 
 ROW_BOUND_HELP = ("drop the C++'s -1e5 lower bound on every LP row: about 4x faster, same optimum and mu (up to "
                   'rounding), but a different LP vertex, so a different V off the support')
+
+VALUE_FUNCTION_HELP = (
+    'which V the MAI index reads. "lp" (default) is the LP vertex\'s V, what the C++ store file holds, so MAI\'s '
+    'numbers depend on which solver and vertex produced it. "dp" is the Bellman recursion on the same multipliers '
+    "(the paper's definition, Section III-A eq. 15): defined at every state and identical across solvers.")
+
+
+def add_value_function_arg(ap: argparse.ArgumentParser) -> None:
+    ap.add_argument("--value-function", choices=VALUE_FUNCTIONS, default="lp", help=VALUE_FUNCTION_HELP)
 
 
 def add_instance_args(ap: argparse.ArgumentParser) -> None:
