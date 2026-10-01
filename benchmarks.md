@@ -429,8 +429,13 @@ not yet that — each a limit of this reproduction rather than a defence of the 
 
 1. **The premise is not implemented.** (40) requires strict indexability, which §6 shows the shared
    code does not provide: the ε perturbation of §V is absent, so `c(s,1,t) − c(s,0,t)` is identically
-   zero. A plateau in code that does not satisfy the hypothesis says nothing about the theorem. It
-   says something about the shared code, and a floor is exactly where a missing ε would show up.
+   zero. A plateau in code that does not satisfy the hypothesis says nothing about the theorem — it
+   is a result about the shared code. It is tempting to go further and call a floor the place a
+   missing ε would show up, but **the evidence available points the other way**: §6 measures the
+   whole tie-break sensitivity at 0.03 points, thirty times smaller than this 0.95% floor, so
+   whatever the floor is, resolving ties differently does not reach it. That bound is indirect — a
+   true ε shifts index values and not merely tie order — but it is the only measurement there is,
+   and it does not support blaming ε.
 2. **One instance, one seed.** Each "case" here is a single random setting (Case II is seed 395),
    not an ensemble. §8.6 ran that check and it is decisive: all three fresh I = 10 seeds keep falling,
    so this floor is seed 395's and not the case's — while two of three fresh I = 6 seeds flatten and
