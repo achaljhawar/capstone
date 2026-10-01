@@ -21,12 +21,11 @@ rather than the single seed-395 instance, and on two other machines:
 | x86-64 | WSL Ubuntu 22.04, Python 3.10, NumPy 2.2.6, SciPy 1.15.3 |
 | aarch64 | NVIDIA DGX Spark (GB10, 20× Cortex-X925, 121 GB), Ubuntu 24.04, Python 3.12, same library versions |
 
-Long runs go on the Spark, which is reachable two ways, and **both are worth knowing before one of
-them fails**: `100.101.143.122` over Tailscale, and `192.168.0.40` on the LAN, which needs no overlay
-when both machines are on `192.168.0.0/24`. A session was lost treating a one-directional Tailscale
-failure as evidence about the machine while the LAN address worked on the first attempt; the Spark had
-been up throughout, and had been reaching the host fine in the other direction. Jobs there go under
-`setsid nohup` so they survive the launching session, which they have done through a host reboot.
+Long runs go on the Spark, over an overlay network with a direct LAN route as a fallback, and
+**knowing both before one of them fails is the point**: an afternoon was lost treating a
+one-directional overlay failure as evidence about the machine, when the LAN route worked on the first
+attempt and the Spark had been up throughout. Jobs there go under `setsid nohup` so they survive the
+launching session, which they have done through a reboot of the controlling host.
 
 Section 7 is the check that the architecture does not matter: with `--value-function dp` the two
 architectures give bit-identical policy costs. Note that the GPU is unused throughout — the LP is 3% of a run's
@@ -501,11 +500,28 @@ p = 0.655 describes that draw rather than the model class.
 
 **At h = 100 the gap ranges from 0.006% to 2.641% across eight instances — a factor of 400**, which is
 far larger than any h-dependence measured within an instance. That is the result the sweep really
-produced, and it has a mechanism already measured in §3: each h is a separate LP solve, and the vertex
-the solver returns moves MAI's gap by 2.2%–6.9% on its own. `dp` removes the solver's `V`, but μ still
-comes from the vertex, so every point in every one of these curves carries a per-h offset of the same
-order as the gap being fitted. Seed 301's *rising* gap and Case III's 10–25σ non-monotonicity are the
-same phenomenon seen twice.
+produced.
+
+Two distinct effects are easy to run together here, and an earlier version of this paragraph did run
+them together by attributing both to §3's vertex lottery. Keeping them apart:
+
+- **Spread across instances at fixed h** needs no special explanation. Different seeds are different
+  problems, with different increment parameters and agent placements, so different achievable gaps.
+  Figure 3 exists precisely because of this spread — its whole design is to show the distribution
+  rather than one draw. §3 is not needed and does not apply.
+- **Non-monotonicity in h within one instance** is where §3 does apply. Seed 301's gap *rising* from
+  2.378% to 2.641% and Case III's 0.58% → 0.92% → 0.39% are 3–25σ against their own Monte-Carlo
+  errors, so they are not sampling noise, and the same instance at a larger h is not a harder problem.
+  Each h is a separate LP solve; §3 measures the returned vertex alone moving MAI by 2.2%–6.9%; `dp`
+  removes the solver's `V` but μ still comes from that vertex. A per-h offset of that order is the
+  available explanation, and it is an inference from §3 rather than a direct measurement — confirming
+  it would mean re-solving one instance at fixed h under different vertex selections and watching the
+  gap move.
+
+The conclusion does not depend on the second bullet being the right mechanism. Whatever causes it, the
+measured fact is that a single instance's gap does not fall monotonically in h at these scales, so a
+two-point tail comparison on one instance cannot establish convergence — and a single instance is not
+an ensemble regardless.
 
 **Consequence for §8.3 and §8.4.** Both are single-instance measurements, and the instance-to-instance
 spread exceeds the effect they fit. Case I's exponent and Case II's floor should be read as properties
