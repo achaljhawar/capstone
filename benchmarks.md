@@ -686,7 +686,7 @@ turned out to be where the only theorem-relevant result lives. This is also the 
 which the floor is reported with an interval rather than a point estimate, which is what makes
 Case I's "includes zero" and Case II's "excludes zero" statable at all.
 
-## 9. Proposition 2: the residual the package reports, and the one it should
+## 9. Proposition 2: a residual that cannot test what it was taken to test
 
 Proposition 2 (p. 13, equation (23)) says a mixture of threshold policies attains the relaxed
 optimum — equivalently, that the complementary-slackness residual is zero at the LP optimum. That
@@ -757,6 +757,58 @@ first day of the project without anyone framing it as *a claim of the paper that
 And the new functions sit beside the deterministic ones rather than replacing them — those are part
 of what makes the port bit-exact with `main.cpp`, and the suite still passes 10/10 afterwards.
 
+## 10. Proposition 1: the decomposition, checked without the circularity
+
+§9 withdrew a claim because its test restated LP duality. This section is the opposite case: a claim
+that was *never* tested, where the thing standing in for a test was circular in the same way.
+
+Proposition 1 says the Lagrangian decomposes over areas at fixed multipliers. The project's working
+notes recorded it as "implicitly exercised every time the per-type LPs' objectives sum to the reported
+lower bound — and it has never disagreed". That is vacuous: `RelaxedSolution.lower_bound`
+(`patrol/lp.py:207`) is *defined* as `sum(a.objective for a in self.agents)`, so the sum cannot
+disagree with itself, and "never disagreed" was a statement about an identity.
+
+The replacement that first suggested itself — solve the per-(i, j) subproblems and compare their total
+against the per-type LP objective — is also wrong, and both reviews said so independently: the
+per-type LP couples areas through μ (`mu_idx(t, nb[a])` in `build_and_solve`), so areas do not
+decompose at the LP level. The decomposition is a property of the inner minimisation at **fixed μ**,
+which is the quantifier the proposition carries.
+
+`tests/check_proposition1.py` tests that. It fixes μ, computes the Lagrangian minimum **jointly** over
+the full product state space — enumerating joint actions across areas and propagating product
+transitions, assuming no factorisation at all — and compares it against the sum of the per-area
+recursions `dp_with_actions` produces, at every t and every product state:
+
+| μ setting | joint == sum of per-area | max abs difference | value at t = 0 |
+|---|---|---:|---:|
+| all zero | PASS | 2.27e−13 | 179.092000 |
+| constant 5 | PASS | 2.27e−13 | 174.092000 |
+| ramp in t | PASS | 2.27e−13 | 179.092000 |
+| asymmetric in i and t | PASS | 1.14e−13 | 171.092000 |
+| random, U(0, 20) | PASS | 2.27e−13 | 156.190707 |
+| negative | PASS | 2.27e−13 | 171.980195 |
+
+Two areas, T = 3, 102 states each, 10,404 product states, 2,601 of them compared at each of three
+times against six multiplier settings. **The decomposition holds to machine precision, including at
+multipliers no LP would return**, which matters because "arbitrary μ" is the content of the claim and
+the LP's own μ is the one setting where a coincidence would be least surprising.
+
+One independent corroboration worth recording: a reviewer wrote its own joint DP for this and
+reported 179.092 at μ = 0 on a 2-area, T = 3 instance. This script gives 179.092000 for the same
+setting. Two separately written joint recursions agreeing on the value is better evidence than either
+agreeing with the per-area one.
+
+**Scope, stated because §5 overclaimed exactly this.** The joint DP reads `AreaProcess.next_states`
+and `ap.cost` from `patrol/model.py`, which is where `dp_with_actions` reads them too. This is
+independent of the *recursion*, not of the *model*: an error in the dynamics or the cost rate sits on
+both sides and cancels. What it would catch is a decomposition that does not hold — for instance μ
+credited to the source area instead of the destination, which is the easy mistake here and which the
+joint version would price differently.
+
+Three areas is accepted by the script and impractical: 102³ product states against 36 joint actions
+does not finish in minutes. Two areas already credits −μ from a neighbour in both directions, which is
+the coupling at issue.
+
 ## Reproducing
 
 ```bash
@@ -805,6 +857,10 @@ python3 check_theorem3_floor.py --dir benchmarks/theorem3_h100 --runs 10000
 # section 8.6 -- the same tails on fresh seeds, which is what shows that 8.3 and 8.4 are
 # single-instance results.  Reads benchmarks/theorem3_seeds/a<areas>_s<seed>.out.
 python3 check_theorem3_seeds.py --dir benchmarks/theorem3_seeds --runs 1000
+
+# section 10 -- Proposition 1's decomposition at fixed mu, joint vs per-area.  Self-contained:
+# builds its own two-area instance, consults no LP and no stored data.
+python3 tests/check_proposition1.py
 ```
 
 `check_lower_bound.py` is a pass/fail test. The other three are measurements: they print tables and
