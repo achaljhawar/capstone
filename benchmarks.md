@@ -634,6 +634,51 @@ the detectable plateau threshold is gap(55) ≥ 0.33%–0.53% depending on the s
 instances sit two to five times below that — the design is blind by construction. At 10,000 runs the
 threshold falls to 0.11%–0.17%, which brings all four inside.
 
+### 8.6b The same six seeds at 10,000 runs
+
+Run: 18 tasks, all `rc=0`, 19:48 on 2026-10-17, rows in `benchmarks/theorem3_seeds10k/`. The change
+over the last octave, with the 1,000-run figure beside it:
+
+| I | seed | h = 20 | h = 55 | h = 100 | 55 → 100 at 10,000 runs | at 1,000 runs |
+|---:|---|---:|---:|---:|---|---|
+| 6 | 300 (Case I) | 1.012% | 0.504% | 0.343% | −0.161 — falling | — |
+| 6 | 301 | 2.352% | 2.521% | 2.637% | **+0.116 (+9.4σ) rising** | +0.148 (+3.7σ) |
+| 6 | 302 | 0.211% | 0.097% | 0.129% | **+0.032 (+2.1σ) rising** | +0.058 (+1.2σ) |
+| 6 | 400 | 0.518% | 0.250% | 0.230% | −0.020 (−1.0σ) unresolved | +0.039 (+0.6σ) |
+| 10 | 395 (Case II) | 1.282% | 1.018% | 0.989% | −0.029 — flat | — |
+| 10 | 396 | 0.414% | 0.237% | 0.194% | **−0.043 (−2.2σ) falling** | −0.062 (−1.0σ) |
+| 10 | 397 | 0.363% | 0.191% | 0.148% | **−0.043 (−2.2σ) falling** | −0.087 (−1.4σ) |
+| 10 | 500 | 0.200% | 0.118% | 0.083% | **−0.034 (−2.4σ) falling** | −0.135 (−3.0σ) |
+
+**Five of the six now have a resolved direction, and they split by case size rather than by
+instance.** Every fresh I = 10 seed is falling at 2.2–2.4σ. No fresh I = 6 seed is falling: two are
+*rising* and the third is unresolved.
+
+Two corrections to §8.6 above, in opposite directions, and both worth stating plainly.
+
+**"All three fresh I = 10 seeds keep falling" was true.** It is now significant on all three. But it
+was asserted from −1.0σ and −1.4σ, which could not support it — being right is not the same as having
+had grounds, and §8.6 criticises exactly that asymmetry a paragraph earlier. The sentence stands; the
+reasoning behind it when first written does not.
+
+**"302 and 400 are flat" was wrong, and not in the direction expected.** Seed 302 is *rising* at
+2.1σ. Seed 400 flipped sign between sample sizes (+0.039 → −0.020) and remains undetermined, which
+is what a genuinely unresolved reading looks like.
+
+**The point estimates at 1,000 runs were unreliable in magnitude even where the sign held.** Seed 500
+moved from −0.135 to −0.034, a factor of four, while keeping its direction and its significance. Any
+conclusion that leaned on the size of those numbers rather than their sign was leaning on noise.
+
+**It agrees with §8.7, by a different design.** The 200-setting ensembles found Case I (I = 6) flat
+past h ≈ 40 and Case II (I = 10) resuming its fall over 55–100. Per-instance at 10,000 runs says the
+same thing: I = 6 tails do not fall, I = 10 tails do. Two designs with different failure modes — one
+averaging instances at moderate precision, one measuring single instances at high precision —
+agreeing is the strongest evidence in this section.
+
+What it does **not** do is rehabilitate §8.4. Seed 395 still flattens where its three fresh siblings
+fall, so it remains atypical for its case, and a resolved *direction* over one octave is still not an
+asymptote (§8.1).
+
 What the check does support: seed 300's clean power law is one draw of eight, and §8.3's
 goodness-of-fit p = 0.655 describes that draw rather than the model class.
 
@@ -958,6 +1003,9 @@ python3 check_theorem3_floor.py --dir benchmarks/theorem3_h100 --runs 10000
 # section 8.6 -- the same tails on fresh seeds, which is what shows that 8.3 and 8.4 are
 # single-instance results.  Reads benchmarks/theorem3_seeds/a<areas>_s<seed>.out.
 python3 check_theorem3_seeds.py --dir benchmarks/theorem3_seeds --runs 1000
+
+# section 8.6b -- the same six seeds at 10,000 runs, which is what resolves their direction.
+python3 check_theorem3_seeds.py --dir benchmarks/theorem3_seeds10k --runs 10000
 
 # section 8.7 -- the averaged-settings convergence result: paired per-setting changes in h.
 python3 reproduce_fig3.py --case 1 --settings 200 --h 10,20,40,55,100 --jobs 18 \
