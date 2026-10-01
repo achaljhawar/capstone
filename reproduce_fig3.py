@@ -29,7 +29,7 @@ from patrol import generate
 from patrol.lp import solve_relaxed
 from patrol.sim import monte_carlo
 
-H_VALUES = (1, 5, 10, 20, 40)
+H_VALUES = (1, 5, 10, 20, 40)          # Figure 3's own horizons; override with --h
 
 # Case -> (areas, graph, seed used for the Figure 4 instance). Figure 3 varies the seed instead.
 CASES = {
@@ -41,12 +41,12 @@ CASES = {
 
 def one_setting(args: tuple) -> list[dict]:
     """Solve the LP for one seed and evaluate both policies at every h."""
-    case, seed, iters, value_function, alpha, beta = args
+    case, seed, iters, value_function, alpha, beta, hs = args
     cfg = CASES[case]
     inst = generate.generate_instance(alpha, beta, cfg["graph"], seed=seed, area_num=cfg["areas"])
     sol = solve_relaxed(inst)
     rows = []
-    for h in H_VALUES:
+    for h in hs:
         row = monte_carlo(inst, sol, h, seed=seed, iter_max=iters, value_function=value_function)
         rows.append(dict(case=case, seed=seed, h=h, lower_bound=row.lower_bound,
                          greedy=row.greedy_avg, mai=row.mai_avg,
@@ -58,6 +58,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--case", default="2", help="1, 2, 3 or 'all'")
     ap.add_argument("--settings", type=int, default=50, help="number of random settings (paper uses 1000)")
+    ap.add_argument("--h", default=",".join(str(h) for h in H_VALUES),
+                    help="comma-separated horizons; the default is Figure 3's own set")
     ap.add_argument("--first-seed", type=int, default=1)
     ap.add_argument("--iters", type=int, default=1000, help="simulation runs per policy per setting")
     ap.add_argument("--value-function", choices=("lp", "dp"), default="dp")
@@ -68,7 +70,8 @@ def main() -> int:
     args = ap.parse_args()
 
     cases = [1, 2, 3] if args.case == "all" else [int(args.case)]
-    work = [(c, s, args.iters, args.value_function, args.alpha, args.beta)
+    hs = tuple(int(x) for x in args.h.split(","))
+    work = [(c, s, args.iters, args.value_function, args.alpha, args.beta, hs)
             for c in cases
             for s in range(args.first_seed, args.first_seed + args.settings)]
 
@@ -91,12 +94,12 @@ def main() -> int:
         if runner:
             runner.shutdown()
 
-    print(f"\nwrote {out}  ({done} settings, {done * len(H_VALUES)} rows, {time.time() - t0:.0f} s)")
-    summarise(out, cases)
+    print(f"\nwrote {out}  ({done} settings, {done * len(hs)} rows, {time.time() - t0:.0f} s)")
+    summarise(out, cases, hs)
     return 0
 
 
-def summarise(path: Path, cases: list[int]) -> None:
+def summarise(path: Path, cases: list[int], hs: tuple[int, ...] = H_VALUES) -> None:
     """The paper's claim: Case I at h=40 is under 3% in over 75% of settings."""
     import collections
     buckets = collections.defaultdict(list)
@@ -105,7 +108,7 @@ def summarise(path: Path, cases: list[int]) -> None:
             buckets[(int(r["case"]), int(r["h"]))].append((float(r["mai_dev"]), float(r["greedy_dev"])))
     print(f"\n{'case':>5} {'h':>4} {'n':>5} {'MAI median':>11} {'MAI <3%':>9} {'GRD median':>11}")
     for case in cases:
-        for h in H_VALUES:
+        for h in hs:
             vals = buckets.get((case, h))
             if not vals:
                 continue
