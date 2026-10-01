@@ -142,6 +142,12 @@ The authors' package has no run log and no LP solution file, and their `Readme.p
 (it only says the slackness should be zero). Their own LP solution, and with it their exact MAI numbers, can't be
 recovered from what they shared.
 
+**Read that table with section 9 in hand.** Those are the *deterministic* diagnostic's values — the one
+`main.cpp` computes by taking an argmin of the Bellman recursion. They differ across configurations because the
+tie-break differs, not because the relaxation is differently satisfied. Computed under each solution's own
+randomized policy, the residual is zero (1e-14) for every vertex. What genuinely varies with the vertex, and what
+moves MAI by percentage points, is `V` off the support — not the slackness.
+
 ## 4. Figure 3: the paper's 75% claim
 
 Section VI claims that for Case I at h = 40, MAI's deviation is under 3% in **over 75%** of randomly
@@ -380,6 +386,44 @@ exactly by the rewritten script, which is the cross-check that they agree. The r
 that the gap-to-bound ratio transformation is unbiased, and that the negative floor the first version
 worried about was only 0.36 SE below zero — a non-issue, where the real problems lay elsewhere.
 
+## 9. Proposition 2: the residual the package reports, and the one it should
+
+Proposition 2 (p. 13, equation (23)) says a mixture of threshold policies attains the relaxed
+optimum — equivalently, that the complementary-slackness residual is zero at the LP optimum. That
+residual is **the last column of `long-term-performance-cost.out`**, and the authors' `Readme.pdf`
+says it should be zero. The shipped code reports values in the hundreds.
+
+The proposition is not at fault. The LP being solved is the dual, so at a vertex the Bellman
+inequalities are tight for several actions at once and the true primal optimum randomises over them.
+`main.cpp` instead rebuilds one deterministic policy from the argmin of the Bellman recursion, and
+complementary slackness does not hold between the LP's dual and an arbitrarily tie-broken policy.
+
+The port reproduced that faithfully and therefore inherited a diagnostic that cannot check anything.
+`patrol.gradients.gradients_randomized` adds the missing path, computing the same gradients under the
+randomized policy the LP solve already produces. `tests/check_proposition2.py` runs both, so the
+contrast is visible rather than asserted:
+
+| Instance | residual, argmin policy | residual, LP policy | max abs gradient, LP policy |
+|---|---:|---:|---:|
+| seed 395 (I=10) | 103.713 | −9.49e−14 | 5.55e−16 |
+| Case I (I=6) | −3.093 | 2.67e−14 | 3.33e−16 |
+| Case II (I=10) | 103.713 | −9.49e−14 | 5.55e−16 |
+| Case III (I=14) | 267.481 | 6.64e−14 | 1.06e−15 |
+
+The check is on the **individual** gradients, not their weighted sum. A sum near zero can be
+cancellation between large terms; every gradient at machine epsilon means each constraint in (23) is
+satisfied on its own, which is the actual content of the proposition.
+
+**Proposition 2 holds on all three paper cases and on the package's own instance.** It is a claim of
+the paper verified from the shared material alone, and it closes the port's last functional gap
+against `main_fixed.cpp` — which had the equivalent fix on the C++ side via CPLEX's row duals.
+
+Two things worth noting about how this was found. It came out of auditing the paper for checkable
+claims rather than from the code: the residual had been computed, printed and discussed since the
+first day of the project without anyone framing it as *a claim of the paper that could be tested*.
+And the new functions sit beside the deterministic ones rather than replacing them — those are part
+of what makes the port bit-exact with `main.cpp`, and the suite still passes 10/10 afterwards.
+
 ## Reproducing
 
 ```bash
@@ -411,6 +455,9 @@ python3 tests/check_lower_bound.py --agents 2
 
 # section 6 -- how much of the ranking is ties, and whether the tie-break moves the number
 python3 tests/measure_index_ties.py --case all
+
+# section 9 -- Proposition 2: residual under the LP's own policy (~4 min for all four)
+python3 tests/check_proposition2.py --case all
 python3 tests/measure_tiebreak_sensitivity.py --case 1 --scaler 40 --runs 60
 
 # section 8 -- the convergence-rate fits, over any directory of case<N>_sweep.out rows.
