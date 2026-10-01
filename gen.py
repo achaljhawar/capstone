@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from patrol.cli import ROW_BOUND_HELP, add_instance_args, instance_from_args
+from patrol.cli import ROW_BOUND_HELP, add_instance_args, add_value_function_arg, instance_from_args
 from patrol.generate import knowledge_set_lines
 from patrol.lp import solve_relaxed
 from patrol.storefile import write_policy, write_value_funcs
@@ -25,6 +25,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     add_instance_args(ap)
     ap.add_argument("--no-row-lower-bound", action="store_true", help=ROW_BOUND_HELP)
+    add_value_function_arg(ap)
     ap.add_argument("--out-dir", default="test23/store", help="main.cpp reads test23/store/store_valueFuncs-seed<seed>.out")
     ap.add_argument("--policy", action="store_true",
                     help="also write store_lpPolicy (the LP's randomized policy; a Python-only extra)")
@@ -46,7 +47,7 @@ def main() -> int:
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     vf = out / f"store_valueFuncs-seed{args.seed}.out"
-    write_value_funcs(sol, vf)
+    write_value_funcs(sol, vf, args.value_function)
     print(f"wrote {vf}")
     if args.policy:
         pol = out / f"store_lpPolicy-seed{args.seed}.out"

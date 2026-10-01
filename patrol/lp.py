@@ -37,6 +37,7 @@ class AgentLP:
     n_rows: int
     n_cols: int
     nnz: int
+    V_dp: list | None = None               # Bellman-recursion V on the same mu; filled on demand by RelaxedSolution.values
 
 
 def _offsets(inst: Instance, j: int) -> tuple[list[int], np.ndarray, int]:
@@ -181,6 +182,21 @@ def dp_with_actions(inst: Instance, j: int, mu: np.ndarray) -> tuple[list[np.nda
     return V, actions
 
 
+VALUE_FUNCTIONS = ("lp", "dp")
+"""Which V the MAI index reads.
+
+"lp" is the value function of the LP vertex, exactly what the C++ writes to its store file and reads back.
+     The LP does not pin V down at states its optimal solution gives no occupation mass, so those entries are
+     whatever the solver's vertex happened to leave: CPLEX and HiGHS disagree on ~75% of them, and MAI's results
+     move with them (see benchmarks.md).
+"dp" is the Bellman recursion on the same multipliers (dp_with_actions), which is the paper's own definition of
+     V (Section III-A, eq. 15). It is defined at every state, equals the LP's V wherever the LP pins it, is
+     itself an optimal solution of the same LP, and does not depend on which solver or vertex produced mu.
+
+Use "lp" to reproduce a particular C++/solver run, "dp" for a number that does not move with the solver.
+"""
+
+
 @dataclass
 class RelaxedSolution:
     """Both agent types, in the layouts the C++ files use."""
@@ -191,19 +207,30 @@ class RelaxedSolution:
     def lower_bound(self) -> float:
         return sum(a.objective for a in self.agents)
 
-    def lower_bound_cxx(self) -> float:
+    def values(self, j: int, value_function: str = "lp") -> list[np.ndarray]:
+        """The V of agent type j under the chosen definition; see VALUE_FUNCTIONS."""
+        if value_function not in VALUE_FUNCTIONS:
+            raise ValueError(f"value_function must be one of {VALUE_FUNCTIONS}, got {value_function!r}")
+        a = self.agents[j]
+        if value_function == "lp":
+            return a.V
+        if a.V_dp is None:
+            a.V_dp = dp_with_actions(self.inst, j, a.mu)[0]
+        return a.V_dp
+
+    def lower_bound_cxx(self, value_function: str = "lp") -> float:
         """getLowerBound (stdafx.cpp:1385): sum_i sum_j p0 . V_0 in the C++ loop order."""
         total = 0.0
         for i in range(self.inst.area_num):
             for j in range(self.inst.type_num):
-                p0, v0 = self.inst.init_probs[i][j], self.value_function(0, i, j)
+                p0, v0 = self.inst.init_probs[i][j], self.value_function(0, i, j, value_function)
                 for s in range(p0.size):
                     total += float(p0[s]) * float(v0[s])
         return total
 
-    def value_function(self, t: int, i: int, j: int) -> np.ndarray:
+    def value_function(self, t: int, i: int, j: int, value_function: str = "lp") -> np.ndarray:
         a = self.agents[j]
-        return a.V[t][a.w_i[i]:a.w_i[i] + self.inst.state_num(i, j)]
+        return self.values(j, value_function)[t][a.w_i[i]:a.w_i[i] + self.inst.state_num(i, j)]
 
     def multiplier(self, t: int, i: int, j: int) -> float:
         return float(self.agents[j].mu[t, i])
