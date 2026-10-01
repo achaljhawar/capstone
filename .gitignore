@@ -40,3 +40,6 @@ VALUE_FUNCTION.md
 # Theorem 3 sweep rows: small, and they are the data behind benchmarks.md section 8.
 !benchmarks/theorem3_h100/*.out
 !benchmarks/theorem3_seeds/*.out
+
+# Averaged-settings convergence rows (section 8.7): small, and cited in the prose.
+!benchmarks/avg_sweep/*.csv
