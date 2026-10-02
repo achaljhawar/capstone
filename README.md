@@ -400,7 +400,7 @@ cite it as well. GitHub's "Cite this repository" button reads [`CITATION.cff`](C
 }
 
 @software{jhawar2026patrolling,
-  author = {Jhawar, Achal},
+  author = {Jhawar, Achal and Nayak, Pratham and Kamalakannan, Deepak},
   title  = {Coordinated Multi-Agent Patrolling with State-Dependent Cost Rates: A {Python} Reimplementation},
   year   = {2026},
   url    = {https://github.com/achaljhawar/capstone}

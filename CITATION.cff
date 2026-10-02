@@ -9,6 +9,13 @@ title: >-
 authors:
   - family-names: Jhawar
     given-names: Achal
+    affiliation: RMIT University
+  - family-names: Nayak
+    given-names: Pratham
+    affiliation: RMIT University
+  - family-names: Kamalakannan
+    given-names: Deepak
+    affiliation: RMIT University
 repository-code: "https://github.com/achaljhawar/capstone"
 abstract: >-
   A Python reimplementation of the C++ code released with Fu, Wang and Chen,
