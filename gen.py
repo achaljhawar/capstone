@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from patrol.cli import ROW_BOUND_HELP, add_instance_args, add_value_function_arg, instance_from_args
 from patrol.generate import knowledge_set_lines
 from patrol.lp import solve_relaxed
-from patrol.storefile import write_policy, write_value_funcs
+from patrol.storefile import sidecar_path, write_policy, write_value_funcs
 
 
 def main() -> int:
@@ -48,7 +48,7 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     vf = out / f"store_valueFuncs-seed{args.seed}.out"
     write_value_funcs(sol, vf, args.value_function)
-    print(f"wrote {vf}")
+    print(f"wrote {vf} and {sidecar_path(vf).name}")
     if args.policy:
         pol = out / f"store_lpPolicy-seed{args.seed}.out"
         write_policy(sol, pol)

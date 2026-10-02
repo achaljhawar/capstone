@@ -15,14 +15,15 @@ class GlibcRand:
         self.srand(seed)
 
     def srand(self, seed: int) -> None:
-        seed &= 0xFFFFFFFF
+        seed &= 0xFFFFFFFF               # srand takes an unsigned int
         if seed == 0:
             seed = 1
         r = [0] * 34
         r[0] = seed
-        word = seed
+        word = seed - (1 << 32) if seed >= 1 << 31 else seed      # glibc seeds from an int32_t word
         for i in range(1, 31):
-            hi, lo = word // 127773, word % 127773
+            hi = abs(word) // 127773 * (1 if word >= 0 else -1)    # C division truncates towards zero
+            lo = word - hi * 127773
             word = 16807 * lo - 2836 * hi
             if word < 0:
                 word += 2147483647

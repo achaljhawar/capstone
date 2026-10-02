@@ -1,0 +1,7 @@
+{
+  "instance_sha256": "10dacd2f0205a0a8bd5403c36b462e52b0ef4680596114c2a9c843cf5f67d09e",
+  "areas": 10,
+  "agent_types": 2,
+  "maxtime": 10,
+  "value_function": "lp"
+}

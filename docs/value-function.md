@@ -6,7 +6,7 @@ that differ by several percentage points. This page explains why and when to use
 
 ## Where V comes from in the C++
 
-The C++ solves the LP of eqs. (17)–(19) and writes the V block of the solution to its store file. The simulator
+The C++ solves the LP of eqs. (17) to (19) and writes the V block of the solution to its store file. The simulator
 reads that V back and computes ϑ from it. This code does the same with `--value-function lp`, the default.
 
 ## Why the LP leaves most of V undetermined

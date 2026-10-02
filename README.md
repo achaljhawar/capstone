@@ -9,7 +9,7 @@ This repository reimplements, in Python, the C++ code that accompanies
 
 > J. Fu, Z. Wang and J. Chen, "Coordinated Multiagent Patrolling With State-Dependent Cost Rates:
 > Asymptotically Optimal Policies for Large-Scale Systems," *IEEE Transactions on Automatic Control*,
-> vol. 70, no. 6, pp. 3800–3815, June 2025. doi:[10.1109/TAC.2024.3517326](https://doi.org/10.1109/TAC.2024.3517326)
+> vol. 70, no. 6, pp. 3800-3815, June 2025. doi:[10.1109/TAC.2024.3517326](https://doi.org/10.1109/TAC.2024.3517326)
 > (preprint: [arXiv:2309.13388](https://arxiv.org/abs/2309.13388)).
 
 The original C++ was written by Jing Fu (RMIT University) and shared by the authors as "code for sharing". It
@@ -46,7 +46,7 @@ This is an independent reimplementation. The paper's authors did not write or re
 
 | Item | Status | Evidence |
 |---|---|---|
-| Same output as the C++ on the same LP solution | Reproduced. Scalers 1, 2 and 5 are in the test suite; seven scalers from 1 to 100 are in [benchmarks.md](benchmarks.md) §2 | `tests/test_against_cpp.py` (10 tests) |
+| Same output as the C++ on the same LP solution | Reproduced. Scalers 1, 2 and 5 are in the test suite; seven scalers from 1 to 100 are in [benchmarks.md](benchmarks.md) §2 | `tests/test_against_cpp.py` (11 tests) |
 | Same output as the authors' own CPLEX build | Reproduced on two CPLEX 22.2 solutions (ARM64 and x86-64) | `tests/data/cpp_reference_cplex*.tsv` |
 | Lower bound from the relaxed LP | Matches CPLEX (371.653 + 3036.31 for the two agent types) | `validate_lp.py`, test suite |
 | Paper Table II (initial agent placement) | Matches for all three cases with seeds 300, 395 and 51 | `tests/find_paper_seeds.py` |
@@ -146,7 +146,7 @@ C++'s `long-term-performance-cost.out`:
 | 2 | Greedy: mean total cost over the runs |
 | 3 | Greedy: 95% confidence half-width of that mean |
 | 4 | Greedy: mean number of movement adaptions per run (moves re-routed to keep the plan feasible) |
-| 5–7 | MAI: the same three |
+| 5 to 7 | MAI: the same three |
 | 8 | Greedy gap to the lower bound, (cost − bound) / bound |
 | 9 | MAI gap to the lower bound |
 | 10 | Lower bound (the relaxed LP's optimum) |
@@ -166,8 +166,9 @@ MAI column, for the reason explained two sections down.
 ## Results
 
 Each chart below says which value function MAI used: `lp` is the LP solution's own V, as the C++ uses it, and
-`dp` is V rebuilt from μ by the Bellman recursion. The distinction matters; see the
-[next section](#the-value-function-and-why-mai-depends-on-the-lp-solver).
+`dp` is V rebuilt from μ by the Bellman recursion. The
+[next section](#the-value-function-and-why-mai-depends-on-the-lp-solver) explains why the two give different
+MAI results.
 
 ### Gap to the lower bound as h grows (Case II)
 
@@ -261,11 +262,13 @@ Greedy and the lower bound are the same in all three columns. The full table is 
 python3 tests/test_against_cpp.py      # or: python3 -m pytest tests/test_against_cpp.py
 ```
 
-The suite has 10 tests. They check that:
+The suite has 11 tests. They check that:
 
-- the glibc `rand()` reimplementation produces glibc's stream, and the libstdc++ heap reimplementation sorts;
+- the glibc `rand()` reimplementation produces glibc's stream, including for seeds of 2³¹ and above, and the
+  libstdc++ heap reimplementation sorts;
 - the generated instance matches the C++ run's own log (`output.txt`, `test33/store/initProbs-*`);
 - the LP optimum and multipliers match the reference values;
+- a solution file is refused when it is loaded into an instance other than the one it was written for;
 - at scalers 1, 2 and 5, every column of the result row matches the C++ on three different LP solutions
   (HiGHS, CPLEX ARM64, CPLEX x86-64): eight columns exactly, and the two confidence half-widths to within 1e-15,
   because the C++ takes its t-quantile from Boost and this code from SciPy;
@@ -308,12 +311,9 @@ about the shared code's model. The differences are:
 
 These are limitations of this repository, as distinct from the differences above:
 
-- Seeds of 2³¹ and above do not reproduce glibc's stream: `GlibcRand` treats the seed as unsigned where glibc
-  uses signed 32-bit arithmetic. Every seed used here is far below that.
-- A solution file loaded with `--store` is checked for dimensions only. A file written for a different instance
-  of the same size loads without an error.
+- A solution file can be checked against its instance only if it has the `.instance.json` sidecar that `gen.py`
+  writes. Files the C++ wrote have none, so they load with a note and the instance options must be right.
 - The Figure 4 input rows, the `*_fixed` C++ sources and their build script are not archived.
-- `validate_lp.py` accepts instance options but compares against the hard-coded seed-395 reference values.
 - The simulator is pure Python and single-threaded. Large h and many settings take a long time.
 
 ## Command-line reference
@@ -383,9 +383,8 @@ The experiment scripts (`reproduce_fig3.py`, `reproduce_fig4.py`, `plot_fig3.py`
 
 ## Citation
 
-If you use this code, cite the original paper. If your work depends on this reimplementation specifically (its
-results, its verification, or the code itself), cite it as well. GitHub's "Cite this repository" button reads
-[`CITATION.cff`](CITATION.cff).
+If you use this code, cite the original paper. If your work relies on this reimplementation's code or results,
+cite it as well. GitHub's "Cite this repository" button reads [`CITATION.cff`](CITATION.cff).
 
 ```bibtex
 @article{fu2025patrolling,

@@ -12,10 +12,11 @@ python3 tests/test_against_cpp.py      # or: python3 -m pytest tests/test_agains
 
 | Test | What it compares |
 |---|---|
-| `test_glibc_rand_matches_glibc` | `GlibcRand` against reference values from glibc for five seeds, including positions 1,000 and 100,001 of one stream |
+| `test_glibc_rand_matches_glibc` | `GlibcRand` against reference values from glibc for ten seeds, including 2³¹ − 1 to 2³² − 1 and −1, and positions 1,000 and 100,001 of one stream |
 | `test_heap_sort_is_a_valid_sort` | The libstdc++ heap reimplementation sorts correctly under a valid comparator |
 | `test_generated_instance_matches_cpp_log` | Every knowledge set, transition increment and initial placement against the C++ run's `output.txt` and `initProbs` file, as text |
 | `test_lp_objective_and_multipliers` | HiGHS's optimum against CPLEX's printed objectives (to their printed precision) and μ against the stored solution (to 1e-8) |
+| `test_store_file_is_checked_against_its_instance` | A solution file's sidecar matches its instance, loading it into a seed-396 instance fails, and a truncated file is refused |
 | `test_slackness_matches_cpp` | The slackness diagnostic, exactly |
 | `test_simulation_matches_cpp` | All ten numeric columns at scalers 1, 2 and 5 on the HiGHS solution |
 | `test_simulation_matches_authors_build_on_cplex_solution` | The same, against the authors' build with real CPLEX on ARM64 |
@@ -113,7 +114,7 @@ The script recomputes the gradients (expected agent presence minus expected agen
 randomized policy given by the LP's row duals, and finds every one at about 1e-15 on all three cases. That is
 what LP duality guarantees for any dual-feasible optimal pair, so the check confirms the solver's output and the
 forward propagation. It does not test the threshold structure that Proposition 2 asserts, and a feasible but
-suboptimal policy can also have zero residuals. The script's closing message says more than the check supports;
+suboptimal policy can also have zero residuals. The script's closing message says this;
 [benchmarks.md](../benchmarks.md) §9 has the full discussion.
 
 ### Measurements

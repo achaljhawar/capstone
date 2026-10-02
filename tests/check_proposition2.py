@@ -22,11 +22,16 @@ residual is exactly what you would expect. (DECISIONS.md part 2 records how this
 the LP solve already produces. This script checks both, so the contrast is visible:
 
   * under the deterministic argmin policy, the residual is large -- reproducing main.cpp;
-  * under the LP's randomized policy, it should vanish, which is Proposition 2 holding.
+  * under the LP's randomized policy, it should vanish.
 
 The stronger check is on the individual gradients rather than their weighted sum: a sum near zero
 could be cancellation between large terms, whereas every gradient at machine epsilon means each
 constraint in (23) is satisfied on its own.
+
+Scope: the randomized policy comes from the LP's row duals, and LP duality makes these flow residuals
+zero for any dual-feasible optimal pair. A pass therefore confirms the solver's output and the forward
+propagation, a necessary condition for Proposition 2. It does not check the threshold structure of
+(21)-(22), and a feasible but suboptimal policy can also have zero residuals (benchmarks.md section 9).
 
 Usage:
     ~/patrol-venv/bin/python tests/check_proposition2.py
@@ -96,9 +101,11 @@ def main() -> int:
     results = {k: check(k) for k in keys}
     print()
     if all(results.values()):
-        print("Proposition 2 holds on every instance checked: the relaxed optimum is attained by the")
-        print("LP's mixture of threshold policies, constraint by constraint. The large residual the")
-        print("shared code reports is its deterministic tie-break, not a failure of the result.")
+        print("Every instance checked has zero flow residuals, constraint by constraint, under the LP's")
+        print("own randomized policy: the solver returned a dual-feasible optimal pair and the forward")
+        print("propagation agrees with it. LP duality guarantees this for any optimal solution, so it is a")
+        print("necessary condition for Proposition 2, not a test of its threshold structure. The large")
+        print("residual the shared code reports comes from its deterministic tie-break.")
         return 0
     print("At least one instance left a residual above tolerance under the LP's own policy, which")
     print("would be a real discrepancy rather than a diagnostic artefact. Investigate before trusting")

@@ -135,7 +135,7 @@ code's gap behaves at reachable h, not tests of the theorem.
 The sweep files are rows written by `simulate.py` with `--value-function dp`; the ensembles come from
 `reproduce_fig3.py --settings 200 --h 10,20,40,55,100`.
 
-In brief: every instance and both ensembles show the large fall from h = 1 to h ≈ 20 that Figure 4 shows. Past
+Every instance and both ensembles show the large fall from h = 1 to h ≈ 20 that Figure 4 shows. Past
 that, behaviour depends on the instance. On the 200-setting ensembles, Case I's mean gap stops falling measurably
 after h ≈ 40 (mean paired change from h = 55 to 100 of −0.013 points, 95% interval −0.042 to +0.017), while
 Case II pauses between 40 and 55 and then falls again (−0.116 points from 55 to 100). Single-instance fits, such

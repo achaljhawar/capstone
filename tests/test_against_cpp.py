@@ -7,6 +7,7 @@ Run with `python3 -m pytest tests/` or, without pytest, `python3 tests/test_agai
 """
 from __future__ import annotations
 
+import gzip
 import random
 import re
 import sys
@@ -24,7 +25,7 @@ from patrol.generate import generate_instance, init_probs_text, knowledge_set_li
 from patrol.gradients import gradients, slackness                # noqa: E402
 from patrol.lp import RelaxedSolution, solve_relaxed             # noqa: E402
 from patrol.sim import monte_carlo                               # noqa: E402
-from patrol.storefile import read_value_funcs                    # noqa: E402
+from patrol.storefile import check_instance, read_value_funcs, write_value_funcs   # noqa: E402
 
 # "Solution value =" printed by CPLEX in cplexEquivalentProblem (both CPLEX runs agree), one per agent type
 CPLEX_OBJECTIVES = {0: 371.653, 1: 3036.31}
@@ -64,6 +65,12 @@ def test_glibc_rand_matches_glibc():
                 595: [1540268827, 555748308, 114335029, 2023060965, 1550303082, 781625404],
                 1394: [1209920109, 1736359695, 1870539949, 1523400179, 1102788765, 656086340],
                 0: [1804289383, 846930886, 1681692777, 1714636915, 1957747793, 424238335]}
+    # seeds at and above 2^31, where glibc seeds from a negative int32_t word
+    expected.update({2147483647: [1065668062, 2142264300, 1066566375, 1064012770],
+                     2147483648: [1336741213, 1210407648, 1447044896, 337392383],
+                     3000000000: [2058147116, 854483408, 922419988, 286396165],
+                     4294967295: [254925627, 1205188300, 366127624, 1401405153],
+                     -1: [254925627, 1205188300, 366127624, 1401405153]})
     for seed, values in expected.items():
         g = GlibcRand(seed)
         assert [g.rand() for _ in values] == values, seed
@@ -98,6 +105,34 @@ def test_lp_objective_and_multipliers():
     _, mu = read_value_funcs(STORE, inst)
     for j in range(inst.type_num):
         assert np.abs(sol.agents[j].mu - mu[:, :, j]).max() < 1e-8
+
+
+def test_store_file_is_checked_against_its_instance():
+    """A store file's sidecar ties it to its instance: loading it into another instance of the same size fails."""
+    inst = _instance()
+    assert check_instance(STORE, inst) is True
+    other = generate_instance(ROOT / "process/test2_alpha.in", ROOT / "process/test2_beta.in",
+                              ROOT / "graph/adjacent_matrix_10.in", seed=396)
+    try:
+        RelaxedSolution.from_store(other, STORE)
+    except ValueError as e:
+        assert "different instance" in str(e)
+    else:
+        raise AssertionError("a seed-395 store loaded into a seed-396 instance without error")
+    with tempfile.TemporaryDirectory() as d:
+        plain = Path(d) / "store.out"
+        plain.write_bytes(gzip.decompress(STORE.read_bytes()))
+        assert check_instance(plain, inst) is None          # no sidecar: loads, but cannot be checked
+        write_value_funcs(_from_store(), Path(d) / "written.out")
+        assert check_instance(Path(d) / "written.out", inst) is True
+        bad = Path(d) / "short.out"
+        bad.write_text("\n".join(plain.read_text().splitlines()[:-1]) + "\n")
+        try:
+            read_value_funcs(bad, inst)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("a truncated store file was accepted")
 
 
 # ----------------------------------------------------------------------------- against the C++ binary

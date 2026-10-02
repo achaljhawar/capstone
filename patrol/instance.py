@@ -1,6 +1,7 @@
 """A concrete problem instance: graph, per-(area, type) processes, initial distribution."""
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,6 +36,19 @@ class Instance:
     def var_num(self) -> int:
         """main.cpp's varNum: total number of (t, i, j, s) value-function entries."""
         return self.maxtime * sum(self.state_num(i, j) for i in range(self.area_num) for j in range(self.type_num))
+
+    def fingerprint(self) -> str:
+        """SHA-256 of everything that defines the instance: sizes, graph, per-(i, j) parameters, initial
+        distribution. A store file's sidecar records it, so the file can be checked against the instance it is
+        loaded into (the C++ store format has no room for it)."""
+        h = hashlib.sha256()
+        h.update(f"{self.area_num} {self.type_num} {self.maxtime}\n".encode())
+        h.update(np.ascontiguousarray(self.adjacency, dtype="<i8").tobytes())
+        for i, row in enumerate(self.processes):
+            for j, ap in enumerate(row):
+                h.update(f"{ap.alpha0} {ap.beta0} {ap.c_a1} {ap.c_a2} {ap.c_b}\n".encode())
+                h.update(np.ascontiguousarray(self.init_probs[i][j], dtype="<f8").tobytes())
+        return h.hexdigest()
 
 
 # ---------------------------------------------------------------------------- loading

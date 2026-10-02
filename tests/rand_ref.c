@@ -10,6 +10,13 @@ int main(void) {
         for (int i = 0; i < 6; i++) printf(" %d", rand());
         printf("\n");
     }
+    unsigned big[] = {2147483647u, 2147483648u, 3000000000u, 4294967295u};
+    for (int q = 0; q < 4; q++) {
+        srand(big[q]);
+        printf("%u:", big[q]);
+        for (int i = 0; i < 4; i++) printf(" %d", rand());
+        printf("\n");
+    }
     srand(495);
     for (int i = 0; i < 999; i++) rand();
     printf("495@1000: %d\n", rand());

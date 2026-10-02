@@ -1,9 +1,9 @@
 # Departures from the paper, and known limitations
 
-A reimplementation can follow the code or the paper. Where the two disagree, this one follows the code, so that
-its output can be checked against the C++ number for number. The first part of this page lists the places where
-the shared C++ and the paper's text disagree. In each of them the Python does what the C++ does. These are not
-translation errors, and the results in this repository describe the shared code's model.
+Where the shared C++ and the paper's text disagree, this reimplementation follows the C++, so that its output
+can be checked against the C++ number for number. The first part of this page lists those places. In each of
+them the Python does what the C++ does, so none of them is a translation error, and the results in this
+repository describe the shared code's model.
 
 The second part lists limitations of this repository itself.
 
@@ -96,25 +96,21 @@ results in this repository should be described as results for the shared code, w
 
 ## Known limitations of this repository
 
-### Large seeds
+An October 2026 review found two defects in the reimplementation itself, both now fixed. `GlibcRand` mishandled
+seeds of 2³¹ and above, because glibc seeds from a signed 32-bit word with C's truncating division. Seed
+2147483648 gave 722473798 where glibc gives 1336741213. And a solution file could be loaded into the wrong
+instance without an error. Neither affected a result here: every seed behind the results is below 1,500, and
+every stored solution was used with its own instance. The test suite now checks both.
 
-`GlibcRand.srand` masks the seed to 32 bits and then runs glibc's seeding recurrence on it as a non-negative Python
-integer. glibc treats the initial word as a signed 32-bit integer and uses C's truncating division. Seeds below 2³¹
-agree; seeds at or above 2³¹, or negative seeds, do not:
+### Solution files from the C++ cannot be checked against an instance
 
-| Seed | glibc first output | `GlibcRand` first output |
-|---:|---:|---:|
-| 395 | 1171090355 | 1171090355 |
-| 2147483648 | 1336741213 | 722473798 |
-| 4294967295 | 254925627 | 1788141860 |
-
-Every seed behind the results here is below 1,500, so no result is affected.
-
-### Solution files are not tied to an instance
-
-`RelaxedSolution.from_store` checks the header dimensions and the total number of values per line, but nothing
-that identifies the instance. A solution file for seed 395 loads into a seed-396 instance of the same size without
-error and reports a different bound. Keep solution files next to the settings that produced them.
+The C++'s solution file records only the dimensions. `gen.py` therefore writes a sidecar next to each file it
+writes, `store_valueFuncs-seed<seed>.out.instance.json`, holding a SHA-256 fingerprint of the instance (sizes,
+graph, per-area parameters and initial distribution). `read_value_funcs` refuses a file whose sidecar names a
+different instance, and it also checks every line's length, the declared variable count and that every value
+is finite. A file the C++ wrote has no sidecar. It still loads, `simulate.py --store` prints a note that it cannot
+be verified, and the instance options have to match the run that wrote it. The three solution files in
+`tests/data/` have sidecars.
 
 ### Figure 4 cannot be rebuilt from a clone
 
@@ -125,10 +121,9 @@ sources nor their build script are in the repository either. The saved `benchmar
 
 ### Other
 
-- `validate_lp.py` accepts the instance options but compares against hard-coded seed-395 reference values, so it
-  is meaningful only for the default instance.
-- `tests/check_proposition2.py` prints that Proposition 2 holds, which is more than its residual check shows
-  ([verification.md](verification.md#proposition-2-flow-residuals-under-the-lps-policy)).
+- `validate_lp.py`'s reference objectives, log and CPLEX solution are the default instance's. On any other
+  instance it skips those comparisons and says so, unless `--cpp-log` and `--cpp-store` are given for that
+  instance's own C++ run.
 - The Figure 3 CSVs do not record the value function, solver version, run count or confidence intervals; the
   scripts' defaults and [benchmarks.md](../benchmarks.md) are the record of those settings.
 - `reproduce_fig3.py` calls h a "horizon" in places. The horizon is T = 10; h is the scaling parameter.

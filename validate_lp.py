@@ -6,6 +6,10 @@ Usage: python3 validate_lp.py [--cpp-store test23/store_cplex/store_valueFuncs-s
 --cpp-store is a store file written by the C++/CPLEX run (keep it apart from test23/store, which gen.py
 overwrites); check [3] is skipped without it. Check [4] is a Python-only sanity check of the LP's randomized
 policy, not main.cpp's gradients (those are in patrol.gradients and tests/test_against_cpp.py).
+
+The reference objectives in check [2], and the default --cpp-log and --cpp-store, belong to the default
+instance (seed 395, 10 areas). For any other instance check [2] is skipped, and checks [1] and [3] run only
+when --cpp-log / --cpp-store are given for that instance's own C++ run.
 """
 from __future__ import annotations
 
@@ -18,12 +22,14 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from patrol.cli import add_instance_args, instance_from_args
-from patrol.generate import knowledge_set_lines
+from patrol.generate import generate_instance, knowledge_set_lines
 from patrol.lp import solve_relaxed
 from patrol.storefile import read_value_funcs
 
 CPP_OBJECTIVES = {0: 371.653, 1: 3036.31}   # "Solution value =" from the C++ CPLEX runs
 CPP_LOWER_BOUND = 3407.97                    # "lower_bound =" in output.txt
+DEFAULT_CPP_LOG = "output.txt"
+DEFAULT_CPP_STORE = "test23/store_cplex/store_valueFuncs-seed395.out"
 
 
 def gradients_under_policy(inst, sol, j):
@@ -62,26 +68,17 @@ def gradients_under_policy(inst, sol, j):
     return g
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    add_instance_args(ap)
-    ap.add_argument("--cpp-log", default="output.txt", help="the C++ run's stdout, for check [1]")
-    ap.add_argument("--cpp-store", default="test23/store_cplex/store_valueFuncs-seed395.out")
-    args = ap.parse_args()
-
-    inst = instance_from_args(args)
-    ok = True
-
-    # 1. knowledge sets and C parameters
-    cpp_lines = [line for line in Path(args.cpp_log).read_text().splitlines() if line.startswith("knowledgeSets")]
+def check_log(cpp_log, inst) -> bool:
+    cpp_lines = [line for line in Path(cpp_log).read_text().splitlines() if line.startswith("knowledgeSets")]
     ours = knowledge_set_lines(inst)
     bad = [k for k, (a, b) in enumerate(zip(ours, cpp_lines)) if a != b] + ([-1] if len(ours) != len(cpp_lines) else [])
     print(f"[1] knowledge sets / C parameters match the C++ log for {len(ours) - len(bad)}/{len(cpp_lines)} (i,j) pairs"
           + (f"   MISMATCH at lines {bad}" if bad else ""))
-    ok &= not bad
+    return not bad
 
-    # 2. objective
-    sol = solve_relaxed(inst)
+
+def check_objectives(sol) -> bool:
+    ok = True
     for a in sol.agents:
         ref = CPP_OBJECTIVES[a.agent_type]
         diff = abs(a.objective - ref)
@@ -91,20 +88,55 @@ def main() -> int:
     diff = abs(sol.lower_bound - CPP_LOWER_BOUND)
     print(f"[2] lower bound {sol.lower_bound:.6f}  vs C++ {CPP_LOWER_BOUND}  (|diff| = {diff:.2e})"
           + ("" if diff < 5e-3 else "   MISMATCH"))
-    ok &= diff < 5e-3
+    return ok and diff < 5e-3
+
+
+def check_store(cpp_store, inst, sol) -> bool:
+    ok = True
+    Vc, muc = read_value_funcs(cpp_store, inst)
+    dmu = max(abs(sol.multiplier(t, i, j) - muc[t, i, j])
+              for t in range(inst.maxtime) for i in range(inst.area_num) for j in range(inst.type_num))
+    print(f"[3] max|mu_py - mu_cpp| = {dmu:.3e}" + ("" if dmu < 1e-6 else "   MISMATCH"))
+    ok &= dmu < 1e-6
+    for j in range(inst.type_num):
+        n_bound = sum(int((np.abs(Vc[t][i][j]) > 9e4).sum()) for t in range(inst.maxtime) for i in range(inst.area_num))
+        n_all = inst.maxtime * sum(inst.state_num(i, j) for i in range(inst.area_num))
+        print(f"[3] agent type {j}: CPLEX file has {n_bound}/{n_all} V entries at the +-1e5 bound "
+              "(off the LP's support, so solver-specific)")
+    return ok
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_instance_args(ap)
+    ap.add_argument("--cpp-log", default=DEFAULT_CPP_LOG, help="the C++ run's stdout, for check [1]")
+    ap.add_argument("--cpp-store", default=DEFAULT_CPP_STORE)
+    args = ap.parse_args()
+
+    inst = instance_from_args(args)
+    is_default = inst.fingerprint() == generate_instance().fingerprint()
+    if not is_default:
+        print("note: not the default seed-395 instance, so the hard-coded C++/CPLEX references do not apply")
+    ok = True
+
+    # 1. knowledge sets and C parameters
+    if not is_default and args.cpp_log == DEFAULT_CPP_LOG:
+        print(f"[1] skipped: {DEFAULT_CPP_LOG} is the default instance's log; pass --cpp-log for this instance")
+    else:
+        ok &= check_log(args.cpp_log, inst)
+
+    # 2. objective
+    sol = solve_relaxed(inst)
+    if is_default:
+        ok &= check_objectives(sol)
+    else:
+        print("[2] skipped: the reference objectives are the default instance's")
 
     # 3. mu vs the CPLEX file
-    if Path(args.cpp_store).exists():
-        Vc, muc = read_value_funcs(args.cpp_store, inst)
-        dmu = max(abs(sol.multiplier(t, i, j) - muc[t, i, j])
-                  for t in range(inst.maxtime) for i in range(inst.area_num) for j in range(inst.type_num))
-        print(f"[3] max|mu_py - mu_cpp| = {dmu:.3e}" + ("" if dmu < 1e-6 else "   MISMATCH"))
-        ok &= dmu < 1e-6
-        for j in range(inst.type_num):
-            n_bound = sum(int((np.abs(Vc[t][i][j]) > 9e4).sum()) for t in range(inst.maxtime) for i in range(inst.area_num))
-            n_all = inst.maxtime * sum(inst.state_num(i, j) for i in range(inst.area_num))
-            print(f"[3] agent type {j}: CPLEX file has {n_bound}/{n_all} V entries at the +-1e5 bound "
-                  "(off the LP's support, so solver-specific)")
+    if not is_default and args.cpp_store == DEFAULT_CPP_STORE:
+        print(f"[3] skipped: {DEFAULT_CPP_STORE} is the default instance's; pass --cpp-store for this instance")
+    elif Path(args.cpp_store).exists():
+        ok &= check_store(args.cpp_store, inst, sol)
     else:
         print(f"[3] skipped: {args.cpp_store} not found")
 

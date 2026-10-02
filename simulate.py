@@ -22,6 +22,7 @@ from patrol.cli import ROW_BOUND_HELP, add_instance_args, add_value_function_arg
 from patrol.gradients import slackness
 from patrol.lp import RelaxedSolution, solve_relaxed
 from patrol.sim import ITER_MAX, monte_carlo
+from patrol.storefile import check_instance, sidecar_path
 
 
 def main() -> int:
@@ -43,6 +44,9 @@ def main() -> int:
     if args.store:
         sol = RelaxedSolution.from_store(inst, args.store)
         source = args.store
+        if check_instance(args.store, inst) is None:
+            print(f"note: {sidecar_path(args.store).name} not found, so {args.store} cannot be checked against "
+                  "this instance; make sure the instance options match the run that wrote it", file=sys.stderr)
     else:
         sol = solve_relaxed(inst, ranged_rows=not args.no_row_lower_bound)
         source = "LP"
@@ -59,6 +63,7 @@ def main() -> int:
               f"  dev {row.greedy_dev:.4f} / {row.mai_dev:.4f}   [{time.time() - t0:.1f} s]", file=sys.stderr)
         print(line)
         if not args.no_write:
+            Path(args.out).parent.mkdir(parents=True, exist_ok=True)
             with open(args.out, "a") as f:
                 f.write(line + "\n")
     return 0

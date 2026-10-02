@@ -1,9 +1,9 @@
 # How the C++ was reimplemented
 
-The target was agreement with the shared C++ at full double precision, not approximate agreement. A Monte Carlo
-simulation that draws one different random number, breaks one tie differently or adds floating-point terms in a
-different order drifts away from the original within a few steps, and then the only possible comparison is
-statistical. Exact agreement makes every disagreement a bug with a location.
+The target was agreement with the shared C++ at full double precision. A Monte Carlo simulation that draws one
+different random number, breaks one tie differently or adds floating-point terms in a different order drifts
+away from the original within a few steps, and after that the two can only be compared statistically. With
+exact agreement, any difference can be traced to the step where the two programs first diverge.
 
 This page lists what that required, then every place the Python deliberately differs from the C++.
 
@@ -23,15 +23,16 @@ initial occupancy (`run + seed + 100`) and once for the transitions (`run + seed
 macOS's libc `rand()` is a different generator, so the C++ build harness force-includes a glibc-compatible
 `rand()` (`tests/cpp_harness/glibc_rand.c`) to make the C++ draw the same numbers on any platform.
 
-The reimplementation does not handle seeds of 2³¹ or more correctly; see
-[departures.md](departures.md#large-seeds).
+glibc seeds the generator from a signed 32-bit word and divides with C's truncation towards zero, so seeds of 2³¹
+and above (and negative seeds) start from a negative word. `GlibcRand` does the same, and the test suite checks
+it against real glibc 2.39 output for seeds from 2³¹ − 1 to 2³² − 1.
 
 ### Movement ranking
 
 The C++ ranks movements by building a `std::make_heap` and popping it with `std::pop_heap`. Its comparator,
 `compare_index_reverse`, treats indices within 1e-10 as equal and then compares source areas. That relation is
 not a strict weak ordering, so the order the heap produces depends on the algorithm's internal steps and on the
-order the movements were inserted, not on any sort key. A call to `sorted()` gives a different order.
+order the movements were inserted. A call to `sorted()` with the same comparator gives a different order.
 
 `patrol.cxx_compat` therefore reimplements libstdc++'s `__adjust_heap`, `__push_heap`, `make_heap` and `pop_heap`
 step by step, and `heap_sort_cxx` runs the C++'s idiom (make the heap, then pop until empty). Movements are
@@ -45,7 +46,7 @@ Sums are accumulated in the C++'s order everywhere a result is compared:
   `dynamicProgrammingWithGivenMultipliers_agent`, and changes action only on a strictly smaller value;
 - `lower_bound_cxx` sums p₀ · V₀ over areas, then types, then states, as `getLowerBound` does;
 - `monte_carlo` computes the mean and the variance with the C++'s running updates
-  (`m += (x − m) / n`), not with NumPy reductions.
+  (`m += (x − m) / n`) instead of NumPy's reductions, which sum in a different order.
 
 The C++ harness builds with `-ffp-contract=off` so that an ARM64 compiler does not fuse multiply-adds that an
 x86-64 build would leave separate.
@@ -79,6 +80,12 @@ not, which is most of V, they differ; [value-function.md](value-function.md) cov
 `N J T varNum`, one line of V for every (t, i, j), then one line of μ per t. Values are written with `repr`, so a
 round trip is exact. Files ending in `.gz` are decompressed on read.
 
+The format has no field that identifies the instance, so `write_value_funcs` also writes a JSON sidecar,
+`<file>.instance.json`, with the instance's fingerprint and the value function written. The C++ ignores it.
+`read_value_funcs` refuses a file whose sidecar names another instance, and checks each line's length, the
+declared variable count and that every value is finite
+([departures.md](departures.md#solution-files-from-the-c-cannot-be-checked-against-an-instance)).
+
 ### Output
 
 Result rows use the C++'s tab-separated layout and its default stream precision (`%g`, six significant digits).
@@ -96,8 +103,8 @@ With `--trajectory DIR`, the simulator writes the four per-step files the C++ wr
 | Randomized-policy diagnostics (`AgentLP.policy`, `gradients_randomized`, `gen.py --policy`) | The C++'s slackness diagnostic uses a tie-broken deterministic policy and cannot be zero in general | Additions only; the C++'s own slackness is still computed and reported |
 | `--from-cpp-log` | Rebuild the exact instance a C++ run used from its stdout | Used by the tests |
 
-Everything the C++ computes is still computed the C++'s way. The additions sit beside the faithful code paths
-and do not replace them, which is what keeps the bit-exact tests meaningful.
+The additions sit beside the faithful code paths. Everything the C++ computes is still computed its way, so the
+bit-exact tests still cover it.
 
 ## What the C++ build harness changes
 

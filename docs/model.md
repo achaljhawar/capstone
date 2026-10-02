@@ -9,21 +9,21 @@ because that is what this reimplementation follows; the disagreements are listed
 | Paper | C++ (`code for sharing`) | Python |
 |---|---|---|
 | Section II and Section VI: the per-sub-area process | `AreaProcess`, `Knowledge` in `stdafx.h`/`stdafx.cpp` | `patrol/model.py` |
-| Section VI and Appendix X: the test instance | `main.cpp` lines 20–187, `constructKnowledgeSets` | `patrol/generate.py`, `patrol/instance.py` |
-| Eqs. (17)–(19): the relaxed problem as an LP | `cplexEquivalentProblem_agent` (`stdafx.cpp:2191`) | `patrol.lp.build_and_solve` |
+| Section VI and Appendix X: the test instance | `main.cpp` lines 20 to 187, `constructKnowledgeSets` | `patrol/generate.py`, `patrol/instance.py` |
+| Eqs. (17) to (19): the relaxed problem as an LP | `cplexEquivalentProblem_agent` (`stdafx.cpp:2191`) | `patrol.lp.build_and_solve` |
 | Eq. (15): Bellman recursion at fixed multipliers | `dynamicProgrammingWithGivenMultipliers_agent` (`stdafx.cpp:596`) | `patrol.lp.dp_with_actions` |
 | Eq. (22): ϑ, the value of moving an agent in | `getVartheta` (`stdafx.cpp:3707`) | `patrol.sim.Simulator._vartheta_table` |
 | Eq. (24) and Algorithm 1: the index ranking | `updateMovementRankingLagrangianIndex`, `decisionMakingLagrangianIndex` | `Simulator._rank_movements`, `Simulator._decide` |
 | Algorithm 2 and eq. (26): movement adaption (MAI) | `movementAdaption`, `updateDistances` | `Simulator._movement_adaption`, `Simulator._update_distances` |
 | Section VI: the greedy baseline | `updateMovementRankingGreedy`, `decisionMakingGreedy` | same functions, `policy=GREEDY` |
-| Section VI: deviation (Γ^{h,ϕ} − Γ*) / Γ* | `main.cpp` lines 533–640 | `patrol.sim.monte_carlo` |
+| Section VI: deviation (Γ^{h,ϕ} − Γ*) / Γ* | `main.cpp` lines 533 to 640 | `patrol.sim.monte_carlo` |
 
 ## The patrol region
 
 There are I areas. `graph/adjacent_matrix_<I>.in` gives the adjacency matrix, and an area counts as its own
-neighbour. There are J = 2 agent types, one per crime type, and the horizon is T = 10 steps. The scaling parameter h
-splits every area into h identical sub-areas, and the number of agents grows in proportion to h. Areas are indexed from 0
-in the code and from 1 in the paper.
+neighbour. There are J = 2 agent types, one per crime type, and the horizon is T = 10 steps. The scaling
+parameter h splits every area into h identical sub-areas, and the number of agents grows in proportion to h.
+Areas are indexed from 0 in the code and from 1 in the paper.
 
 The paper's three cases are I = 6, 10 and 14 (Cases I, II and III). The default instance is Case II with seed 395,
 the seed hard-coded in `main.cpp`.
@@ -41,7 +41,7 @@ is always the initial (α₀, β₀); the other 50 follow in increasing α. This
 `constructKnowledgeSets` and fixes the layout of every array and file.
 
 The crime probability is p = α / (α + β), except that p = 0.01 when α = 0. The cost per step is 100p
-(`costRateAAPair`). The cost depends only on the knowledge. It does not depend on the action or the time.
+(`costRateAAPair`). It depends only on the knowledge; the action and the time do not enter it.
 
 ### Transitions
 
@@ -81,7 +81,7 @@ Case III.
 
 Relaxing the constraint that agents only move between neighbours (and conserve their number) with multipliers μ
 splits the problem by agent type and by area. For each agent type j, `build_and_solve` sets up the LP of
-eqs. (17)–(19):
+eqs. (17) to (19):
 
 - variables V[t][i][s] for every time, area and state, and μ[t][i] for every time and area;
 - maximise Σᵢ p₀ᵢ · V[0][i];
